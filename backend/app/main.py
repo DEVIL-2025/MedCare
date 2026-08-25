@@ -22,7 +22,9 @@ from backend.app.routers import (
     notifications,
     metrics,
     assistant,
-    ws
+    ws,
+    auth,
+    users
 )
 
 logging.basicConfig(
@@ -63,6 +65,8 @@ app.add_middleware(
 )
 
 # Register Routers
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(dashboard.router)
 app.include_router(inventory.router)
 app.include_router(transactions.router)

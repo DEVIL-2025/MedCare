@@ -11,69 +11,218 @@ from backend.app.models import (
     ForecastRecord, DemandSurgeEvent, InventoryRisk,
     ReplenishmentRecommendation, PurchaseOrder, InventoryTransfer,
     Alert, NotificationLog, Scenario, ScenarioResult, SystemSetting,
-    DemandSignal, AlertEscalation, SalesOrder
+    DemandSignal, AlertEscalation, SalesOrder,
+    User, Role, Permission, RolePermission, AuditLog
 )
+from backend.app.services.auth_service import AuthService
 
-PRODUCTS_DATA = [
-    # Analgesics
-    {"sku": "P-1042", "name": "Paracetamol 500mg", "category": "Analgesics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 250, "default_safety_stock": 100, "moq": 100, "unit_cost": 25.0, "is_temperature_sensitive": False},
-    {"sku": "P-1065", "name": "Paracetamol 650mg", "category": "Analgesics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 200, "default_safety_stock": 80, "moq": 80, "unit_cost": 32.0, "is_temperature_sensitive": False},
-    {"sku": "I-7783", "name": "Ibuprofen 400mg", "category": "Analgesics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 200, "default_safety_stock": 80, "moq": 60, "unit_cost": 45.0, "is_temperature_sensitive": False},
-    {"sku": "T-5012", "name": "Tramadol 50mg", "category": "Analgesics", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 100, "default_safety_stock": 40, "moq": 30, "unit_cost": 85.0, "is_temperature_sensitive": False},
+PERMISSIONS_DATA = [
+    # Dashboard
+    {"id": "dashboard.view", "permission_code": "dashboard.view", "module": "dashboard", "action": "view", "description": "View executive control tower dashboard and KPIs"},
+    {"id": "dashboard.refresh", "permission_code": "dashboard.refresh", "module": "dashboard", "action": "refresh", "description": "Trigger dynamic metrics recalculation"},
+    {"id": "dashboard.execute_recommendation", "permission_code": "dashboard.execute_recommendation", "module": "dashboard", "action": "execute", "description": "Execute 1-click executive recommendations"},
 
-    # Antibiotics
-    {"sku": "A-2381", "name": "Amoxicillin 250mg", "category": "Antibiotics", "criticality": "Critical", "unit": "Capsules", "shelf_life_days": 540, "default_reorder_point": 300, "default_safety_stock": 120, "moq": 100, "unit_cost": 65.0, "is_temperature_sensitive": False},
-    {"sku": "AZ-3391", "name": "Azithromycin 500mg", "category": "Antibiotics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 150, "default_safety_stock": 60, "moq": 50, "unit_cost": 120.0, "is_temperature_sensitive": False},
-    {"sku": "D-3356", "name": "Doxycycline 100mg", "category": "Antibiotics", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 150, "default_safety_stock": 60, "moq": 50, "unit_cost": 55.0, "is_temperature_sensitive": False},
-    {"sku": "CF-5534", "name": "Cefixime 200mg", "category": "Antibiotics", "criticality": "High", "unit": "Strips", "shelf_life_days": 540, "default_reorder_point": 180, "default_safety_stock": 70, "moq": 60, "unit_cost": 95.0, "is_temperature_sensitive": False},
-    {"sku": "CF-8845", "name": "Ceftriaxone 1g Injection", "category": "Antibiotics", "criticality": "Critical", "unit": "Vials", "shelf_life_days": 365, "default_reorder_point": 100, "default_safety_stock": 40, "moq": 30, "unit_cost": 180.0, "is_temperature_sensitive": True},
+    # Inventory
+    {"id": "inventory.view", "permission_code": "inventory.view", "module": "inventory", "action": "view", "description": "View DC stock balances and product batches"},
+    {"id": "inventory.create_product", "permission_code": "inventory.create_product", "module": "inventory", "action": "create", "description": "Register new pharmaceutical product in catalog"},
+    {"id": "inventory.record_sale", "permission_code": "inventory.record_sale", "module": "inventory", "action": "create", "description": "Record hospital or distributor sale and FEFO decrement"},
+    {"id": "inventory.record_stock_transaction", "permission_code": "inventory.record_stock_transaction", "module": "inventory", "action": "create", "description": "Execute receipt, adjustment, or consumption stock transaction"},
+    {"id": "inventory.create_transfer", "permission_code": "inventory.create_transfer", "module": "inventory", "action": "create", "description": "Initiate inter-DC stock rebalancing transfer"},
+    {"id": "inventory.view_transactions", "permission_code": "inventory.view_transactions", "module": "inventory", "action": "view", "description": "View historical audit trail of inventory transactions"},
+    {"id": "inventory.export", "permission_code": "inventory.export", "module": "inventory", "action": "export", "description": "Export inventory data to CSV"},
+    {"id": "inventory.delete_product", "permission_code": "inventory.delete_product", "module": "inventory", "action": "delete", "description": "Permanently delete product catalog entry and cascade dependent records"},
 
-    # Cough & Cold
-    {"sku": "C-5562", "name": "Cough Syrup 100ml", "category": "Cough & Cold", "criticality": "High", "unit": "Bottles", "shelf_life_days": 730, "default_reorder_point": 180, "default_safety_stock": 70, "moq": 60, "unit_cost": 75.0, "is_temperature_sensitive": False},
-    {"sku": "CT-3312", "name": "Cetirizine 10mg", "category": "Cough & Cold", "criticality": "Medium", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 250, "default_safety_stock": 100, "moq": 100, "unit_cost": 18.0, "is_temperature_sensitive": False},
-    {"sku": "MT-7756", "name": "Montelukast 10mg", "category": "Cough & Cold", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 150, "default_safety_stock": 60, "moq": 50, "unit_cost": 92.0, "is_temperature_sensitive": False},
+    # Demand Forecast
+    {"id": "forecast.view", "permission_code": "forecast.view", "module": "forecast", "action": "view", "description": "View ML demand curves and sensed velocity forecasts"},
+    {"id": "forecast.view_history", "permission_code": "forecast.view_history", "module": "forecast", "action": "view", "description": "View historical consumption time-series"},
+    {"id": "forecast.view_accuracy", "permission_code": "forecast.view_accuracy", "module": "forecast", "action": "view", "description": "View ML model transparency, accuracy, and lineage"},
+    {"id": "forecast.run", "permission_code": "forecast.run", "module": "forecast", "action": "run", "description": "Execute automated demand sensing and surge detection pipeline"},
+    {"id": "forecast.train", "permission_code": "forecast.train", "module": "forecast", "action": "train", "description": "Trigger compute-heavy ML forecaster retraining"},
 
-    # Diabetes Care
-    {"sku": "M-5521", "name": "Metformin 500mg", "category": "Diabetes Care", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 350, "default_safety_stock": 150, "moq": 150, "unit_cost": 30.0, "is_temperature_sensitive": False},
-    {"sku": "G-2210", "name": "Glimepiride 2mg", "category": "Diabetes Care", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 200, "default_safety_stock": 80, "moq": 80, "unit_cost": 42.0, "is_temperature_sensitive": False},
-    {"sku": "IN-6620", "name": "Insulin Glargine 100IU", "category": "Diabetes Care", "criticality": "Critical", "unit": "Vials", "shelf_life_days": 365, "default_reorder_point": 80, "default_safety_stock": 30, "moq": 25, "unit_cost": 450.0, "is_temperature_sensitive": True},
+    # Replenishment
+    {"id": "replenishment.view", "permission_code": "replenishment.view", "module": "replenishment", "action": "view", "description": "View replenishment recommendations and purchase orders"},
+    {"id": "replenishment.approve", "permission_code": "replenishment.approve", "module": "replenishment", "action": "approve", "description": "Approve purchase order and replenishment recommendation"},
+    {"id": "replenishment.reject", "permission_code": "replenishment.reject", "module": "replenishment", "action": "reject", "description": "Reject replenishment recommendation"},
+    {"id": "replenishment.create_transfer", "permission_code": "replenishment.create_transfer", "module": "replenishment", "action": "create", "description": "Approve and execute inter-DC transfer opportunity"},
+    {"id": "replenishment.view_fefo", "permission_code": "replenishment.view_fefo", "module": "replenishment", "action": "view", "description": "View live FEFO batch allocations"},
+    {"id": "replenishment.view_purchase_orders", "permission_code": "replenishment.view_purchase_orders", "module": "replenishment", "action": "view", "description": "View historical and approved supplier purchase orders"},
 
-    # Gastro Care
-    {"sku": "O-9911", "name": "Omeprazole 20mg", "category": "Gastro Care", "criticality": "Medium", "unit": "Capsules", "shelf_life_days": 730, "default_reorder_point": 300, "default_safety_stock": 120, "moq": 100, "unit_cost": 38.0, "is_temperature_sensitive": False},
-    {"sku": "PN-7705", "name": "Pantoprazole 40mg", "category": "Gastro Care", "criticality": "Medium", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 220, "default_safety_stock": 90, "moq": 80, "unit_cost": 52.0, "is_temperature_sensitive": False},
-    {"sku": "LP-4456", "name": "Loperamide 2mg", "category": "Gastro Care", "criticality": "Low", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 120, "default_safety_stock": 50, "moq": 40, "unit_cost": 22.0, "is_temperature_sensitive": False},
+    # Alerts
+    {"id": "alerts.view", "permission_code": "alerts.view", "module": "alerts", "action": "view", "description": "View inventory risk alerts and root-cause diagnoses"},
+    {"id": "alerts.acknowledge", "permission_code": "alerts.acknowledge", "module": "alerts", "action": "acknowledge", "description": "Acknowledge active alert and take ownership"},
+    {"id": "alerts.resolve", "permission_code": "alerts.resolve", "module": "alerts", "action": "resolve", "description": "Mark alert resolved post-action"},
 
-    # Vitamins & Minerals
-    {"sku": "V-1122", "name": "Vitamin D3 60K", "category": "Vitamins", "criticality": "Medium", "unit": "Capsules", "shelf_life_days": 730, "default_reorder_point": 250, "default_safety_stock": 100, "moq": 100, "unit_cost": 60.0, "is_temperature_sensitive": False},
-    {"sku": "Z-9901", "name": "Zinc Sulphate 20mg", "category": "Vitamins", "criticality": "Low", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 120, "default_safety_stock": 50, "moq": 40, "unit_cost": 28.0, "is_temperature_sensitive": False},
-    {"sku": "CC-6645", "name": "Calcium Carbonate + D3", "category": "Vitamins", "criticality": "Low", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 160, "default_safety_stock": 60, "moq": 60, "unit_cost": 48.0, "is_temperature_sensitive": False},
+    # Warehouses
+    {"id": "warehouses.view", "permission_code": "warehouses.view", "module": "warehouses", "action": "view", "description": "View DC locations, utilization, and capacity metrics"},
+    {"id": "warehouses.view_utilization", "permission_code": "warehouses.view_utilization", "module": "warehouses", "action": "view", "description": "View historical capacity utilization metrics"},
+    {"id": "warehouses.view_trends", "permission_code": "warehouses.view_trends", "module": "warehouses", "action": "view", "description": "View warehouse volume and storage trends"},
+    {"id": "warehouses.manage", "permission_code": "warehouses.manage", "module": "warehouses", "action": "manage", "description": "Register, configure, edit, and decommission warehouse distribution centers"},
 
-    # Respiratory
-    {"sku": "S-6677", "name": "Salbutamol Inhaler", "category": "Respiratory", "criticality": "Critical", "unit": "Inhalers", "shelf_life_days": 540, "default_reorder_point": 120, "default_safety_stock": 50, "moq": 40, "unit_cost": 165.0, "is_temperature_sensitive": False},
-    {"sku": "BD-9910", "name": "Budesonide Respules", "category": "Respiratory", "criticality": "High", "unit": "Respules", "shelf_life_days": 540, "default_reorder_point": 100, "default_safety_stock": 40, "moq": 30, "unit_cost": 140.0, "is_temperature_sensitive": False},
+    # Reports
+    {"id": "reports.view", "permission_code": "reports.view", "module": "reports", "action": "view", "description": "View operational and executive SCM report analytics"},
+    {"id": "reports.generate", "permission_code": "reports.generate", "module": "reports", "action": "generate", "description": "Filter and generate multi-dimensional reports"},
+    {"id": "reports.export", "permission_code": "reports.export", "module": "reports", "action": "export", "description": "Export analytical report tables to CSV"},
 
-    # Cardiovascular
-    {"sku": "AM-4423", "name": "Amlodipine 5mg", "category": "Cardiovascular", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 300, "default_safety_stock": 120, "moq": 100, "unit_cost": 26.0, "is_temperature_sensitive": False},
-    {"sku": "LS-5583", "name": "Losartan 50mg", "category": "Cardiovascular", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 220, "default_safety_stock": 90, "moq": 80, "unit_cost": 58.0, "is_temperature_sensitive": False},
-    {"sku": "AT-6694", "name": "Atorvastatin 10mg", "category": "Cardiovascular", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 250, "default_safety_stock": 100, "moq": 100, "unit_cost": 72.0, "is_temperature_sensitive": False},
+    # User Management
+    {"id": "users.view", "permission_code": "users.view", "module": "users", "action": "view", "description": "View user accounts and role assignments"},
+    {"id": "users.create", "permission_code": "users.create", "module": "users", "action": "create", "description": "Create new system user accounts"},
+    {"id": "users.edit", "permission_code": "users.edit", "module": "users", "action": "edit", "description": "Edit user profiles and credentials"},
+    {"id": "users.deactivate", "permission_code": "users.deactivate", "module": "users", "action": "deactivate", "description": "Activate or deactivate user accounts"},
+    {"id": "users.reset_password", "permission_code": "users.reset_password", "module": "users", "action": "reset_password", "description": "Reset user passwords"},
+    {"id": "users.assign_role", "permission_code": "users.assign_role", "module": "users", "action": "assign_role", "description": "Assign or update user roles"},
+
+    # Audit
+    {"id": "audit.view", "permission_code": "audit.view", "module": "audit", "action": "view", "description": "View immutable system audit logs"},
+
+    # System
+    {"id": "system.configuration", "permission_code": "system.configuration", "module": "system", "action": "configure", "description": "Modify algorithmic and system configuration parameters"},
+    {"id": "system.database", "permission_code": "system.database", "module": "system", "action": "database", "description": "Access system database diagnostics"},
+    {"id": "system.migrations", "permission_code": "system.migrations", "module": "system", "action": "migrations", "description": "Run and inspect database schema migrations"},
+    {"id": "system.data_management", "permission_code": "system.data_management", "module": "system", "action": "data_management", "description": "Administrative data management operations"}
 ]
 
-WAREHOUSES_DATA = [
-    {"id": "MUM-01", "name": "Mumbai Central DC", "location": "Bhiwandi, Mumbai, Maharashtra", "tier": "Metro DC", "region": "West", "capacity_units": 20000, "current_utilization_pct": 67.0, "lead_time_days": 3, "map_x": 30.0, "map_y": 48.0, "health_score": 90, "status": "Healthy"},
-    {"id": "BLR-01", "name": "Bengaluru South DC", "location": "Hosur Road, Bengaluru, Karnataka", "tier": "Metro DC", "region": "South", "capacity_units": 16000, "current_utilization_pct": 78.0, "lead_time_days": 4, "map_x": 46.0, "map_y": 68.0, "health_score": 88, "status": "Healthy"},
-    {"id": "DEL-02", "name": "Delhi NCR DC", "location": "Kundli, Delhi NCR", "tier": "Metro DC", "region": "North", "capacity_units": 14000, "current_utilization_pct": 91.0, "lead_time_days": 5, "map_x": 42.0, "map_y": 22.0, "health_score": 62, "status": "At Risk"},
-    {"id": "HYD-01", "name": "Hyderabad DC", "location": "Medchal, Hyderabad, Telangana", "tier": "Tier-1 DC", "region": "South", "capacity_units": 12000, "current_utilization_pct": 55.0, "lead_time_days": 4, "map_x": 46.0, "map_y": 55.0, "health_score": 85, "status": "Healthy"},
-    {"id": "CHE-01", "name": "Chennai DC", "location": "Sriperumbudur, Chennai, Tamil Nadu", "tier": "Tier-1 DC", "region": "South", "capacity_units": 10000, "current_utilization_pct": 78.0, "lead_time_days": 4, "map_x": 48.0, "map_y": 78.0, "health_score": 72, "status": "Monitor"},
-    {"id": "KOL-01", "name": "Kolkata DC", "location": "Dankuni, Kolkata, West Bengal", "tier": "Tier-1 DC", "region": "East", "capacity_units": 9000, "current_utilization_pct": 48.0, "lead_time_days": 6, "map_x": 68.0, "map_y": 42.0, "health_score": 93, "status": "Healthy"},
-    {"id": "PAT-01", "name": "Patna Tier-2 DC", "location": "Fatuha, Patna, Bihar", "tier": "Tier-2 DC", "region": "East", "capacity_units": 6000, "current_utilization_pct": 89.0, "lead_time_days": 7, "map_x": 62.0, "map_y": 34.0, "health_score": 58, "status": "At Risk"},
-    {"id": "PNQ-01", "name": "Pune DC", "location": "Chakan, Pune, Maharashtra", "tier": "Tier-1 DC", "region": "West", "capacity_units": 7500, "current_utilization_pct": 63.0, "lead_time_days": 3, "map_x": 32.0, "map_y": 52.0, "health_score": 87, "status": "Healthy"},
-    {"id": "COK-01", "name": "Coimbatore DC", "location": "Peelamedu, Coimbatore, Tamil Nadu", "tier": "Tier-2 DC", "region": "South", "capacity_units": 5000, "current_utilization_pct": 41.0, "lead_time_days": 5, "map_x": 44.0, "map_y": 82.0, "health_score": 94, "status": "Healthy"},
-]
+
+async def seed_auth_data(session: AsyncSession, force: bool = False):
+    """Seeds roles, permissions, role-permission mappings, and initial users into PostgreSQL."""
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # 1. Seed Roles
+    roles_res = await session.execute(select(Role))
+    existing_roles = {r.id: r for r in roles_res.scalars().all()}
+
+    if not existing_roles or force:
+        admin_role = existing_roles.get("ADMIN") or Role(
+            id="ADMIN",
+            name="ADMIN",
+            description="Full administrative, security, and operational access across the entire platform.",
+            created_at=now_utc
+        )
+        manager_role = existing_roles.get("MANAGER") or Role(
+            id="MANAGER",
+            name="MANAGER",
+            description="Operational supply chain access across inventory, replenishment, demand, alerts, and reports.",
+            created_at=now_utc
+        )
+        if "ADMIN" not in existing_roles:
+            session.add(admin_role)
+        if "MANAGER" not in existing_roles:
+            session.add(manager_role)
+        await session.flush()
+
+    # 2. Seed Permissions
+    perms_res = await session.execute(select(Permission))
+    existing_perms = {p.id: p for p in perms_res.scalars().all()}
+
+    new_perms = []
+    for p_data in PERMISSIONS_DATA:
+        if p_data["id"] not in existing_perms:
+            perm = Permission(**p_data)
+            session.add(perm)
+            new_perms.append(perm)
+    if new_perms:
+        await session.flush()
+
+    # 3. Seed Role-Permissions Mapping
+    role_perms_res = await session.execute(select(RolePermission))
+    existing_rp = {(rp.role_id, rp.permission_id) for rp in role_perms_res.scalars().all()}
+
+    admin_restricted_perms = set()  # Admin gets everything
+    manager_restricted_perms = {
+        "inventory.delete_product",
+        "forecast.train",
+        "warehouses.manage",
+        "users.view",
+        "users.create",
+        "users.edit",
+        "users.deactivate",
+        "users.reset_password",
+        "users.assign_role",
+        "audit.view",
+        "system.configuration",
+        "system.database",
+        "system.migrations",
+        "system.data_management"
+    }
+
+    new_mappings = []
+    for p_data in PERMISSIONS_DATA:
+        p_id = p_data["id"]
+        # Admin mapping
+        if ("ADMIN", p_id) not in existing_rp:
+            new_mappings.append(RolePermission(role_id="ADMIN", permission_id=p_id))
+        # Manager mapping (if not restricted)
+        if p_id not in manager_restricted_perms and ("MANAGER", p_id) not in existing_rp:
+            new_mappings.append(RolePermission(role_id="MANAGER", permission_id=p_id))
+
+    if new_mappings:
+        session.add_all(new_mappings)
+        await session.flush()
+
+    # 4. Seed Initial Users
+    users_res = await session.execute(select(User))
+    existing_users = {u.user_id: u for u in users_res.scalars().all()}
+
+    initial_users = [
+        {
+            "id": "USR-ADMIN-01",
+            "user_id": "admin",
+            "email": "admin@medcarepharma.com",
+            "full_name": "System Administrator",
+            "password_hash": AuthService.hash_password("Admin@12345"),
+            "role_id": "ADMIN",
+            "is_active": True,
+            "must_change_password": False,
+            "created_at": now_utc,
+            "updated_at": now_utc,
+            "created_by": "System"
+        },
+        {
+            "id": "USR-MGR-01",
+            "user_id": "manager",
+            "email": "manager@medcarepharma.com",
+            "full_name": "Rohan Mehta",
+            "password_hash": AuthService.hash_password("Manager@12345"),
+            "role_id": "MANAGER",
+            "is_active": True,
+            "must_change_password": False,
+            "created_at": now_utc,
+            "updated_at": now_utc,
+            "created_by": "System"
+        },
+        {
+            "id": "USR-MGR-02",
+            "user_id": "aditi.rao",
+            "email": "aditi.rao@medcarepharma.com",
+            "full_name": "Dr. Aditi Rao",
+            "password_hash": AuthService.hash_password("Manager@12345"),
+            "role_id": "MANAGER",
+            "is_active": True,
+            "must_change_password": False,
+            "created_at": now_utc,
+            "updated_at": now_utc,
+            "created_by": "System"
+        }
+    ]
+
+    for u_data in initial_users:
+        if u_data["user_id"] not in existing_users:
+            session.add(User(**u_data))
+        else:
+            u_obj = existing_users[u_data["user_id"]]
+            u_obj.is_active = True
+            u_obj.password_hash = u_data["password_hash"]
+            u_obj.must_change_password = False
+
+    await session.commit()
+    print("[Seeder] Auth & RBAC roles, permissions, and users successfully synchronized in PostgreSQL!")
 
 
 async def seed_database(session: AsyncSession, force: bool = False):
     """Seed synthetic realistic data for MedCare Pharma SCM Control Tower with small values."""
-    print("[Seeder] Checking existing data...")
+    print("[Seeder] Initializing Auth & RBAC tables...")
+    await seed_auth_data(session, force=force)
+
+    print("[Seeder] Checking existing business data...")
     if not force:
         existing = await session.execute(select(Product))
         if existing.scalars().first():

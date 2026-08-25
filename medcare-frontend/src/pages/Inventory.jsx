@@ -3,7 +3,7 @@ import React from 'react';
 import {
   Search, Plus, Download, Package, Boxes, AlertOctagon, PackageX,
   ShoppingCart, ArrowRightLeft, History, ChevronDown, ChevronRight,
-  Layers, Trash2, HelpCircle, Calendar, Sparkles, Clock
+  Layers, Trash2, HelpCircle, Calendar, Sparkles, Clock, X
 } from 'lucide-react';
 import StatCard from '../components/ui/StatCard';
 import Badge from '../components/ui/Badge';
@@ -16,6 +16,7 @@ import RecordSaleModal from '../components/inventory/RecordSaleModal';
 import { riskTone, riskLabel } from '../data/riskTone';
 import { api } from '../api/client';
 import { useControlTower } from '../context/ControlTowerContext';
+import { formatDate, formatDateTime } from '../utils/dateUtils';
 
 const quickFilters = [
   { key: 'all', label: 'All Items', test: () => true },
@@ -40,6 +41,11 @@ export default function Inventory() {
   const [expandedSkus, setExpandedSkus] = useState({});
   const [expandedTxIds, setExpandedTxIds] = useState({});
 
+  // History search and expansion states
+  const [txSearch, setTxSearch] = useState('');
+  const [txExpanded, setTxExpanded] = useState(false);
+  const [txLoading, setTxLoading] = useState(false);
+
   // Modals State
   const [txModalOpen, setTxModalOpen] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
@@ -50,7 +56,7 @@ export default function Inventory() {
     setLoading(true);
     setError(null);
     try {
-      const [items, cats, whs, txs] = await Promise.all([
+      const [items, cats, whs] = await Promise.all([
         api.getInventory({
           warehouse: selectedWarehouse,
           category: categoryFilter,
@@ -58,13 +64,11 @@ export default function Inventory() {
           rollup: rollupView && selectedWarehouse === 'All'
         }),
         api.getCategories(),
-        api.getWarehouses(),
-        api.getTransactions({ warehouse: selectedWarehouse !== 'All' ? selectedWarehouse : undefined, limit: 12 })
+        api.getWarehouses()
       ]);
       setProducts(Array.isArray(items) ? items : []);
       setCategories(Array.isArray(cats) ? cats : []);
       setWarehouses(Array.isArray(whs) ? whs : (whs?.overview || []));
-      setRecentTransactions(Array.isArray(txs) ? txs : []);
     } catch (err) {
       console.error('Failed to load inventory:', err);
       setError(err.message || 'Unable to connect to inventory backend service.');
@@ -73,9 +77,29 @@ export default function Inventory() {
     }
   }, [selectedWarehouse, categoryFilter, quickFilter, rollupView]);
 
+  const loadTransactions = useCallback(async () => {
+    setTxLoading(true);
+    try {
+      const txs = await api.getTransactions({
+        warehouse: selectedWarehouse !== 'All' ? selectedWarehouse : undefined,
+        search: txSearch.trim() || undefined,
+        limit: txExpanded ? 100 : 10
+      });
+      setRecentTransactions(Array.isArray(txs) ? txs : []);
+    } catch (err) {
+      console.warn('Failed to load transactions:', err);
+    } finally {
+      setTxLoading(false);
+    }
+  }, [selectedWarehouse, txSearch, txExpanded]);
+
   useEffect(() => {
     loadInventory();
   }, [loadInventory, refreshKey]);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions, refreshKey]);
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
@@ -179,71 +203,70 @@ export default function Inventory() {
           <h2 className="text-[16px] font-bold text-ink-900">Inventory Management & Stock Tracking</h2>
           <p className="text-[12px] text-ink-500">Live multi-echelon stock levels, FEFO batch expiry dates, and real-time inventory adjustments.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={exportCSV}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-ink-200 rounded-md text-[12px] font-medium text-ink-700 hover:bg-cream-200 transition-colors cursor-pointer"
-          >
-            <Download size={14} /> Export CSV
-          </button>
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => handleOpenSaleModal()}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-forest-100 border border-forest-600/30 text-forest-900 rounded-md text-[12px] font-semibold hover:bg-forest-200 transition-colors cursor-pointer shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-forest-700 text-white rounded-md text-[12.5px] font-semibold hover:bg-forest-600 transition-colors shadow-xs cursor-pointer"
+            title="Record Outbound Sale"
           >
-            <ShoppingCart size={14} className="text-forest-700" /> Record Sale
-          </button>
-          <button
-            onClick={() => setAddProductOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-forest-600 text-forest-800 rounded-md text-[12px] font-semibold hover:bg-forest-50 transition-colors cursor-pointer"
-          >
-            <Plus size={14} /> Add New Product
+            <ShoppingCart size={14} /> Record Sale
           </button>
           <button
             onClick={() => handleOpenTxModal()}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-forest-700 hover:bg-forest-600 text-white rounded-md text-[12px] font-semibold transition-colors shadow-sm cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-forest-800 text-white rounded-md text-[12.5px] font-semibold hover:bg-forest-700 transition-colors shadow-xs cursor-pointer"
+            title="Record Stock Receipt, Adjustment, or Inter-DC Transfer"
           >
-            <Plus size={15} /> Record Stock Tx
+            <Plus size={14} /> Record Stock Tx
+          </button>
+          <button
+            onClick={() => setAddProductOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-ink-200 text-ink-700 rounded-md text-[12.5px] font-medium hover:bg-cream-200 transition-colors cursor-pointer"
+          >
+            <Package size={14} /> Add Product
+          </button>
+          <button
+            onClick={exportCSV}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-ink-200 text-ink-700 rounded-md text-[12.5px] font-medium hover:bg-cream-200 transition-colors cursor-pointer"
+            title="Export filtered inventory dataset to CSV"
+          >
+            <Download size={14} /> Export CSV
           </button>
         </div>
       </div>
 
-      {/* Dynamic KPI Cards - Context Aware for Active Tab */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Dynamic Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard
-          icon={Boxes}
-          tone="forest"
-          label="Tracked SKUs"
-          value={filtered.length}
-          delta={quickFilter === 'all' ? 'Active database catalog' : `Filtered: ${quickFilters.find(f => f.key === quickFilter)?.label}`}
-          deltaPositive={true}
-        />
-        <StatCard
-          icon={Package}
-          tone="gold"
-          label="Total Units in Stock"
+          label="Total Inventory Units"
           value={totalUnits.toLocaleString()}
-          delta={selectedWarehouse === 'All' ? 'Across all regional DCs' : `In DC ${selectedWarehouse}`}
-          deltaPositive={true}
+          subtext={`Across ${selectedWarehouse === 'All' ? '8 Active DCs' : selectedWarehouse}`}
+          icon={Boxes}
+          tone="neutral"
         />
         <StatCard
-          icon={AlertOctagon}
-          tone="brick"
+          label="Active SKU Count"
+          value={filtered.length}
+          subtext={`${categories.length} Categories Tracked`}
+          icon={Package}
+          tone="good"
+        />
+        <StatCard
           label="Low Stock SKUs"
           value={lowStockCount}
-          delta="Below dynamic reorder point"
-          deltaPositive={lowStockCount === 0}
+          subtext="Below Reorder Point (ROP)"
+          icon={AlertOctagon}
+          tone={lowStockCount > 0 ? 'warning' : 'good'}
         />
         <StatCard
-          icon={PackageX}
-          tone="brick"
-          label="Stockout Incidents"
+          label="Stockout / Critical"
           value={outOfStockCount}
-          delta="Zero available inventory"
-          deltaPositive={outOfStockCount === 0}
+          subtext="Immediate Inbound Required"
+          icon={PackageX}
+          tone={outOfStockCount > 0 ? 'critical' : 'good'}
         />
       </div>
 
-      {/* Filter and Search Bar */}
+      {/* Filters and Search Bar */}
       <div className="bg-white p-3.5 rounded-lg border border-ink-100 shadow-card space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           {/* Search Box */}
@@ -251,50 +274,56 @@ export default function Inventory() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
             <input
               type="text"
-              placeholder="Search by SKU or Product Name..."
+              placeholder="Search by SKU, Molecule Name, or Category..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-[12.5px] rounded-md border border-ink-200 focus:outline-none focus:border-forest-600 bg-cream-100/50"
+              className="w-full pl-9 pr-3 py-1.5 border border-ink-200 rounded-md text-[12.5px] focus:outline-none focus:ring-1 focus:ring-forest-600 bg-cream-100/40"
             />
           </div>
 
-          {/* Select Dropdowns & View Toggle */}
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={selectedWarehouse}
-              onChange={(e) => setSelectedWarehouse(e.target.value)}
-              className="text-[12px] px-2.5 py-1.5 rounded-md border border-ink-200 bg-white text-ink-700 focus:outline-none focus:border-forest-600"
-            >
-              <option value="All">🌐 All Warehouses</option>
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>{w.name} ({w.id})</option>
-              ))}
-            </select>
-
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="text-[12px] px-2.5 py-1.5 rounded-md border border-ink-200 bg-white text-ink-700 focus:outline-none focus:border-forest-600"
-            >
-              <option value="All">All Categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-
-            {selectedWarehouse === 'All' && (
-              <button
-                onClick={() => setRollupView(!rollupView)}
-                className={`px-3 py-1.5 rounded-md text-[11.5px] font-medium border transition-colors flex items-center gap-1 cursor-pointer ${
-                  rollupView
-                    ? 'bg-forest-100 border-forest-600/40 text-forest-900 font-semibold'
-                    : 'bg-white border-ink-200 text-ink-600 hover:bg-cream-100'
-                }`}
-                title="Toggle consolidated SKU view with expandable DC breakdown"
+          {/* Filters Row */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Category Filter */}
+            <div className="flex items-center gap-1.5 text-[12px]">
+              <span className="text-ink-500 font-medium">Category:</span>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="border border-ink-200 rounded px-2.5 py-1 text-[12px] text-ink-800 bg-white focus:outline-none focus:ring-1 focus:ring-forest-600"
               >
-                <Layers size={13} />
-                {rollupView ? 'Consolidated Stock View' : 'All Warehouse Rows'}
-              </button>
+                <option value="All">All Categories</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Warehouse Filter */}
+            <div className="flex items-center gap-1.5 text-[12px]">
+              <span className="text-ink-500 font-medium">DC Scope:</span>
+              <select
+                value={selectedWarehouse}
+                onChange={(e) => setSelectedWarehouse(e.target.value)}
+                className="border border-ink-200 rounded px-2.5 py-1 text-[12px] text-ink-800 bg-white focus:outline-none focus:ring-1 focus:ring-forest-600 font-mono"
+              >
+                <option value="All">All Warehouses (Network)</option>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name} ({w.id})</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Aggregate Rollup Switch */}
+            {selectedWarehouse === 'All' && (
+              <label className="flex items-center gap-1.5 text-[12px] text-ink-700 font-medium cursor-pointer ml-1 select-none">
+                <input
+                  type="checkbox"
+                  checked={rollupView}
+                  onChange={(e) => setRollupView(e.target.checked)}
+                  className="rounded text-forest-700 focus:ring-forest-600 cursor-pointer"
+                />
+                <span>Rollup View</span>
+              </label>
             )}
           </div>
         </div>
@@ -317,7 +346,7 @@ export default function Inventory() {
         </div>
       </div>
 
-      {/* Inventory Items Table with Pure Table Cell Alignment */}
+      {/* Inventory Items Table */}
       {loading ? (
         <LoadingState message="Loading live inventory records from PostgreSQL..." />
       ) : error ? (
@@ -438,14 +467,6 @@ export default function Inventory() {
                                             </span>
                                           </span>
                                         </th>
-                                        <th className="py-2 px-3 text-right">
-                                          <span className="inline-flex items-center gap-1 justify-end text-forest-800">
-                                            Available to Sell
-                                            <span title="Available for orders and dispatch (Physical stock minus reserved units)" className="text-ink-400 cursor-help">
-                                              <HelpCircle size={11} />
-                                            </span>
-                                          </span>
-                                        </th>
                                         <th className="py-2 px-3 text-right">Reorder Point (ROP)</th>
                                         <th className="py-2 px-3 text-right">Days of Cover</th>
                                         <th className="py-2 px-3 text-center">Status</th>
@@ -457,7 +478,6 @@ export default function Inventory() {
                                         <tr key={wIdx} className="hover:bg-cream-100/50">
                                           <td className="py-2 px-3 font-mono font-bold text-ink-800">{wb.warehouseId}</td>
                                           <td className="py-2 px-3 text-right font-bold text-ink-900">{Number(wb.currentStock).toLocaleString()}</td>
-                                          <td className="py-2 px-3 text-right font-semibold text-forest-700">{Number(wb.availableStock).toLocaleString()}</td>
                                           <td className="py-2 px-3 text-right text-ink-500 font-mono">{Number(wb.reorderPoint).toLocaleString()}</td>
                                           <td className="py-2 px-3 text-right font-semibold text-forest-700">{Number(wb.daysOfCover).toFixed(1)}d</td>
                                           <td className="py-2 px-3 text-center">
@@ -478,7 +498,7 @@ export default function Inventory() {
                                 </div>
                               )}
 
-                              {/* 2. Live Database Batch Expiry Details per Batch (Item #6 Fix) */}
+                              {/* 2. Live Database Batch Expiry Details */}
                               <div className="space-y-2 pt-1">
                                 <div className="text-[12px] font-bold text-ink-800 flex items-center justify-between">
                                   <span className="flex items-center gap-1.5">
@@ -516,7 +536,7 @@ export default function Inventory() {
                                             <td className="py-2 px-3 font-mono text-ink-700">{b.warehouseId}</td>
                                             <td className="py-2 px-3 text-right font-medium text-ink-900">{Number(b.quantity || 0).toLocaleString()}</td>
                                             <td className="py-2 px-3 text-right font-semibold text-forest-800">{Number(b.availableQuantity || b.quantity || 0).toLocaleString()}</td>
-                                            <td className="py-2 px-3 font-medium text-ink-800">{b.expiryDate}</td>
+                                            <td className="py-2 px-3 font-medium text-ink-800">{formatDate(b.expiryDate)}</td>
                                             <td className="py-2 px-3">
                                               <span className={`px-2 py-0.5 rounded text-[10.5px] font-medium ${
                                                 dExp <= 30
@@ -553,17 +573,53 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Recent Inventory Transactions Live Audit Log (Item #7 Expand/Collapse & Real Timestamps) */}
-      <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-[14.5px] font-bold text-ink-900 flex items-center gap-1.5">
-            <History size={16} className="text-forest-700" /> Recent Inventory Transactions (Live PostgreSQL Log)
-          </h3>
-          <span className="text-[11px] text-ink-500 font-mono">Real-Time Inbound/Outbound Audit Ledger</span>
+      {/* Recent Inventory Transactions Live Audit Log with Dynamic Search & Expand/Collapse */}
+      <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-ink-100">
+          <div>
+            <h3 className="text-[14.5px] font-bold text-ink-900 flex items-center gap-1.5">
+              <History size={16} className="text-forest-700" /> Recent Inventory Transactions (Live PostgreSQL Log)
+            </h3>
+            <span className="text-[11px] text-ink-500">Real-Time Inbound, Outbound & Inter-DC Transfer Audit Ledger</span>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Dynamic Search Box */}
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
+              <input
+                type="text"
+                placeholder="Search history (SKU, DC, Type, Ref)..."
+                value={txSearch}
+                onChange={(e) => setTxSearch(e.target.value)}
+                className="pl-8 pr-7 py-1 text-[12px] border border-ink-200 rounded-md focus:outline-none focus:ring-1 focus:ring-forest-600 bg-cream-100/50 w-64"
+              />
+              {txSearch && (
+                <button
+                  onClick={() => setTxSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700 cursor-pointer"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Expand / View More Toggle Button */}
+            <button
+              onClick={() => setTxExpanded(!txExpanded)}
+              className="px-2.5 py-1 text-[11.5px] font-medium border border-ink-200 rounded hover:bg-cream-200 text-ink-700 transition-colors cursor-pointer"
+            >
+              {txExpanded ? 'Show Latest 10' : 'View More (100 Records)'}
+            </button>
+          </div>
         </div>
 
-        {recentTransactions.length === 0 ? (
-          <p className="text-[12px] text-ink-400">No recent transactions recorded yet in PostgreSQL.</p>
+        {txLoading ? (
+          <div className="py-4 text-center text-ink-400 text-[12px] animate-pulse">Loading transaction records from PostgreSQL...</div>
+        ) : recentTransactions.length === 0 ? (
+          <p className="text-[12px] text-ink-400 py-3 text-center">
+            {txSearch ? `No historical transactions match "${txSearch}".` : 'No transactions recorded yet in PostgreSQL.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11.5px] border-collapse">
@@ -585,8 +641,7 @@ export default function Inventory() {
                   const fullReason = tx.reason || tx.referenceId || '-';
                   const isLongReason = fullReason.length > 35;
 
-                  // Clean display timestamp
-                  const formattedTimeStr = tx.formattedTime || (tx.timestamp ? new Date(tx.timestamp).toLocaleString() : '-');
+                  const formattedTimeStr = formatDateTime(tx.timestamp || tx.formattedTime);
 
                   return (
                     <tr key={tx.id} className="hover:bg-cream-100/50 transition-colors">
@@ -651,6 +706,7 @@ export default function Inventory() {
           onSuccess={() => {
             triggerRefresh();
             loadInventory();
+            loadTransactions();
           }}
         />
       )}
@@ -663,6 +719,7 @@ export default function Inventory() {
           onProductAdded={() => {
             triggerRefresh();
             loadInventory();
+            loadTransactions();
           }}
         />
       )}
@@ -676,6 +733,7 @@ export default function Inventory() {
           onSaleRecorded={() => {
             triggerRefresh();
             loadInventory();
+            loadTransactions();
           }}
         />
       )}

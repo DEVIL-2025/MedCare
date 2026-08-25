@@ -110,27 +110,44 @@ class AlertEscalationEngine:
         inv_res = await session.execute(inv_query)
         items = inv_res.all()
 
+        # Bulk pre-fetch all existing alerts and batches (eliminates 384 N+1 queries)
+        all_alerts_res = await session.execute(select(Alert))
+        alerts_by_node = {}
+        for a in all_alerts_res.scalars().all():
+            alerts_by_node.setdefault(f"{a.sku}_{a.warehouse_id}", []).append(a)
+
+        all_batches_res = await session.execute(
+            select(Batch).where(Batch.quantity > 0)
+        )
+        batches_by_node = {}
+        for b in all_batches_res.scalars().all():
+            batches_by_node.setdefault(f"{b.sku}_{b.warehouse_id}", []).append(b)
+
         modified_alerts = []
 
         for inv, prod in items:
-            # Fetch active alerts for this (sku, warehouse_id)
-            existing_alerts_res = await session.execute(
-                select(Alert).where(
-                    and_(
-                        Alert.sku == inv.sku,
-                        Alert.warehouse_id == inv.warehouse_id,
-                        Alert.status != "Resolved"
-                    )
+            node_key = f"{inv.sku}_{inv.warehouse_id}"
+            all_node_alerts = alerts_by_node.get(node_key, [])
+            active_alerts = [a for a in all_node_alerts if a.status != "Resolved"]
+            recently_resolved = [
+                a for a in all_node_alerts
+                if a.status == "Resolved" and (
+                    (a.resolved_at and (now - a.resolved_at).total_seconds() < 43200) or
+                    (a.created_at and (now - a.created_at).total_seconds() < 43200 and not a.resolved_at)
                 )
-            )
-            active_alerts = existing_alerts_res.scalars().all()
+            ]
+
             stockout_alerts = [a for a in active_alerts if a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"]]
             lowstock_alerts = [a for a in active_alerts if a.alert_type in ["LOW_STOCK", "Low Stock"]]
             expiry_alerts = [a for a in active_alerts if a.alert_type in ["EXPIRY_RISK", "Expiry Risk"]]
 
+            resolved_stockout = any(a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"] for a in recently_resolved)
+            resolved_lowstock = any(a.alert_type in ["LOW_STOCK", "Low Stock"] for a in recently_resolved)
+            resolved_expiry = any(a.alert_type in ["EXPIRY_RISK", "Expiry Risk"] for a in recently_resolved)
+
             # Condition 1: Total Stockout (0 units)
             if inv.current_stock <= 0:
-                if not stockout_alerts:
+                if not stockout_alerts and not resolved_stockout:
                     new_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="STOCKOUT",
@@ -164,7 +181,7 @@ class AlertEscalationEngine:
                     sa.severity = "good"
                     sa.resolved_at = now
 
-                if not lowstock_alerts:
+                if not lowstock_alerts and not resolved_lowstock:
                     new_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="LOW_STOCK",
@@ -197,7 +214,7 @@ class AlertEscalationEngine:
                     sa.severity = "good"
                     sa.resolved_at = now
 
-                if not lowstock_alerts:
+                if not lowstock_alerts and not resolved_lowstock:
                     new_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="LOW_STOCK",
@@ -232,23 +249,14 @@ class AlertEscalationEngine:
                     modified_alerts.append(a)
 
             # Condition 5: Batch Expiry Check
-            batch_res = await session.execute(
-                select(Batch).where(
-                    and_(
-                        Batch.sku == inv.sku,
-                        Batch.warehouse_id == inv.warehouse_id,
-                        Batch.quantity > 0
-                    )
-                )
-            )
-            batches = batch_res.scalars().all()
+            batches = batches_by_node.get(node_key, [])
             near_expiry_batches = [b for b in batches if (b.expiry_date - today).days <= 30]
 
             if near_expiry_batches:
                 earliest_b = min(near_expiry_batches, key=lambda b: b.expiry_date)
                 d_exp = (earliest_b.expiry_date - today).days
                 tot_exp_qty = sum(b.quantity for b in near_expiry_batches)
-                if not expiry_alerts:
+                if not expiry_alerts and not resolved_expiry:
                     new_exp_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-EXP-{inv.sku}-{inv.warehouse_id}",
                         alert_type="EXPIRY_RISK",

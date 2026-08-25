@@ -8,6 +8,7 @@ import ErrorState from '../components/ui/ErrorState';
 import EmptyState from '../components/ui/EmptyState';
 import { api } from '../api/client';
 import { useControlTower } from '../context/ControlTowerContext';
+import { formatDateTime } from '../utils/dateUtils';
 
 const catTone = { critical: 'critical', warning: 'warning', medium: 'medium', info: 'info', good: 'good' };
 const catLabel = { critical: 'Critical', warning: 'High', medium: 'Medium', info: 'Info', good: 'Resolved' };
@@ -193,7 +194,13 @@ export default function Alerts() {
                           <div className="text-[10.5px] text-ink-400 font-mono">{a.sku}</div>
                         </td>
                         <td className="py-2.5 px-3 font-mono font-medium text-ink-700">{a.warehouse}</td>
-                        <td className="py-2.5 px-3 text-[11.5px] text-ink-600 max-w-xs">{a.detail}</td>
+                        <td className="py-2.5 px-3 text-[11.5px] text-ink-600 max-w-xs">
+                          <div>{a.detail}</div>
+                          <div className="text-[10px] text-ink-400 font-mono mt-0.5 flex items-center gap-1">
+                            <Clock size={11} className="text-ink-400" />
+                            {formatDateTime(a.createdAtRaw || a.createdAt)}
+                          </div>
+                        </td>
                         <td className="py-2.5 px-3">
                           <Badge tone={statusTone[a.status] || 'neutral'}>{a.status}</Badge>
                         </td>

@@ -1,9 +1,14 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Package, TrendingUp, Truck, Bell, Building2, FileBarChart, GitBranch, Settings as SettingsIcon, Cross, Sparkles } from 'lucide-react';
+import {
+  LayoutDashboard, Package, TrendingUp, Truck, Bell, Building2,
+  FileBarChart, GitBranch, Settings as SettingsIcon, Cross, Users
+} from 'lucide-react';
 import { useControlTower } from '../../context/ControlTowerContext';
+import { useAuth } from '../../context/AuthContext';
 
-export default function Sidebar({ onOpenAssistant }) {
+export default function Sidebar() {
   const { activeAlertCount } = useControlTower();
+  const { isAdmin } = useAuth();
 
   const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -14,8 +19,10 @@ export default function Sidebar({ onOpenAssistant }) {
     { to: '/warehouses', label: 'Warehouses', icon: Building2 },
     { to: '/reports', label: 'Reports', icon: FileBarChart },
     { to: '/scenario-simulator', label: 'Scenario Simulator', icon: GitBranch },
+    ...(isAdmin ? [{ to: '/users', label: 'User Management', icon: Users }] : []),
     { to: '/settings', label: 'Settings', icon: SettingsIcon },
   ];
+
   return (
     <aside className="w-60 bg-forest-900 text-cream-100 flex flex-col shrink-0">
       <div className="flex items-center gap-2.5 px-5 py-5 border-b border-white/10">
@@ -51,19 +58,9 @@ export default function Sidebar({ onOpenAssistant }) {
         ))}
       </nav>
 
-      <div className="mx-2.5 mb-3 p-3 rounded-md bg-forest-800/50 border border-white/5">
-        <div className="flex items-center gap-1.5 mb-1">
-          <Sparkles size={12} className="text-forest-500" />
-          <span className="text-[11px] font-medium text-cream-100/80">AI Supply Chain Assistant</span>
-        </div>
-        <p className="text-[10.5px] text-cream-100/45 mb-2 leading-snug">Ask questions, get insights and recommendations.</p>
-        <button
-          onClick={onOpenAssistant}
-          className="w-full text-[11px] font-medium bg-cream-100/10 text-cream-100/90 rounded px-2 py-1.5 hover:bg-cream-100/15 cursor-pointer transition-colors"
-        >
-          Ask Assistant
-        </button>
+      <div className="p-3 border-t border-white/10 text-center">
+        <div className="text-[10.5px] text-cream-100/40">MedCare SCM Control Tower v2.4</div>
       </div>
     </aside>
-  )
+  );
 }

@@ -1,4 +1,4 @@
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any, Tuple, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
@@ -10,27 +10,35 @@ from backend.app.models.replenishment import ReplenishmentRecommendation
 from backend.app.models.transfer import InventoryTransfer
 from backend.app.ml.predict import PredictionService
 from backend.app.config import settings
+from backend.app.utils.timezone import get_today_ist, get_now_ist
 
 
 class ReplenishmentEngine:
     """
-    P1 Replenishment Decision, Quantity/Frequency Optimization & Live DB Synchronization Engine.
-    Produces explainable restock and transfer recommendations with high-performance bulk execution.
+    P1 Dynamic Expiry-Aware Replenishment & Order Quantity Optimization Engine.
+    Computes Recommended Order Quantities (ROQ), safety stock buffers,
+    service-level targets, and order frequencies based on live ML forecasts and batch expiries.
     """
 
     @staticmethod
     async def sync_recommendations(
         session: AsyncSession,
-        warehouse_id: Optional[str] = None
+        warehouse_id: Optional[str] = None,
+        precomputed_forecasts: Optional[Dict[str, Any]] = None
     ) -> List[ReplenishmentRecommendation]:
         """
         High-performance bulk synchronization of replenishment recommendations.
         Eliminates N+1 queries by bulk pre-fetching references and vectorized ML forecasts.
         """
-        today = date(2026, 8, 24)
+        today = get_today_ist()
 
         # 1. Bulk pre-fetch all necessary metadata (single queries instead of loops)
-        query = select(Inventory, Product).join(Product, Inventory.sku == Product.sku).where(Product.is_active != False)
+        query = (
+            select(Inventory, Product)
+            .join(Product, Inventory.sku == Product.sku)
+            .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
+            .where(Product.is_active != False, Warehouse.is_active != False)
+        )
         if warehouse_id and warehouse_id != "All":
             query = query.where(Inventory.warehouse_id == warehouse_id)
 
@@ -48,8 +56,8 @@ class ReplenishmentEngine:
         )
         matching_trf_map = {f"{t.sku}_{t.destination_warehouse_id}": t for t in trf_res.scalars().all()}
 
-        # 2. Bulk get all forecasts in 1 cached ML pass
-        all_forecasts = await PredictionService.predict_all_demands(session, 30)
+        # 2. Bulk get all forecasts in 1 ML pass
+        all_forecasts = precomputed_forecasts if precomputed_forecasts is not None else await PredictionService.predict_all_demands(session, 30)
 
         active_recs = []
 
@@ -149,7 +157,7 @@ class ReplenishmentEngine:
                 existing_rec.reason_why = reason_why
                 existing_rec.reason_when = reason_when
                 existing_rec.reason_impact = reason_impact
-                if existing_rec.status != "APPROVED":
+                if existing_rec.status not in ["APPROVED", "COMPLETED", "ACKNOWLEDGED", "REJECTED"]:
                     existing_rec.status = "PENDING"
                 active_recs.append(existing_rec)
             else:
@@ -174,7 +182,7 @@ class ReplenishmentEngine:
                     reason_impact=reason_impact,
                     status="PENDING",
                     requested_by="P1 Replenishment Optimizer",
-                    created_at=datetime.utcnow()
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None)
                 )
                 session.add(new_rec)
                 active_recs.append(new_rec)

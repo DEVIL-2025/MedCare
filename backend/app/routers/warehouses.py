@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, delete, func, and_, or_
 from typing import List, Dict, Any, Optional
 from datetime import date, datetime, timedelta, timezone
 from pydantic import BaseModel, Field
@@ -9,12 +9,24 @@ from backend.app.database import get_db
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.inventory import Inventory
 from backend.app.models.product import Product
+from backend.app.models.batch import Batch
 from backend.app.models.transaction import InventoryTransaction
 from backend.app.models.transfer import InventoryTransfer
-from backend.app.models.replenishment import ReplenishmentRecommendation
+from backend.app.models.replenishment import ReplenishmentRecommendation, PurchaseOrder
 from backend.app.models.alert import Alert
+from backend.app.models.notification import NotificationLog
+from backend.app.models.escalation import AlertEscalation
+from backend.app.models.risk import InventoryRisk
+from backend.app.models.forecast import ForecastRecord, DemandSurgeEvent
+from backend.app.models.signal import DemandSignal
+from backend.app.models.demand import DemandHistory, DistributorOrder, Promotion
 from backend.app.schemas.warehouse import WarehouseCreate
 from backend.app.routers.ws import ws_manager
+from backend.app.dependencies.auth import require_permission, get_optional_user
+from backend.app.models.auth import User
+from backend.app.services.audit_service import AuditService
+from backend.app.ml.predict import PredictionService
+from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime
 
 router = APIRouter(prefix="/api/warehouses", tags=["Warehouses"])
 
@@ -34,7 +46,7 @@ async def get_warehouses_overview(db: AsyncSession = Depends(get_db)) -> Dict[st
     Returns dynamically aggregated DC capacity metrics, space utilization,
     inventory valuation rankings, capacity utilization trends, and geographical map points.
     """
-    today = date.today()
+    today = get_today_ist()
     res = await db.execute(
         select(Warehouse).where(Warehouse.is_active != False).order_by(Warehouse.id.asc())
     )
@@ -112,9 +124,7 @@ async def get_warehouses_overview(db: AsyncSession = Depends(get_db)) -> Dict[st
 
     top_by_value.sort(key=lambda x: x["valInr"], reverse=True)
 
-    # Dynamic Historical Capacity Trend from Inventory Transactions
-    top_3_wh_ids = [w.id for w in warehouses[:3]]
-
+    # Dynamic Historical Capacity Trend from Inventory Transactions for all active warehouses
     capacity_trend = []
 
     for weeks_ago in range(5, -1, -1):
@@ -130,8 +140,7 @@ async def get_warehouses_overview(db: AsyncSession = Depends(get_db)) -> Dict[st
             "date": target_date.strftime("%d %b")
         }
 
-        for wh in warehouses[:3]:
-
+        for wh in warehouses:
             # Get the latest inventory transaction for this warehouse
             # on or before the historical date.
             historical_res = await db.execute(
@@ -153,20 +162,17 @@ async def get_warehouses_overview(db: AsyncSession = Depends(get_db)) -> Dict[st
 
             if historical_transaction:
                 historical_stock = historical_transaction.new_stock
-
                 historical_utilization = (
                     historical_stock / max(1, wh.capacity_units)
                 ) * 100
-
                 point_data[wh.id] = round(
                     min(100, max(0, historical_utilization)),
                     1
                 )
-
             else:
-                # No transaction history exists for this warehouse/date.
-                # Do not fabricate a value.
-                point_data[wh.id] = 0
+                inv_units = wh_inv_map.get(wh.id, 0)
+                current_util = (inv_units / max(1, wh.capacity_units)) * 100 if wh.capacity_units else wh.current_utilization_pct
+                point_data[wh.id] = round(min(100, max(0, float(current_util or 0))), 1)
 
         capacity_trend.append(point_data)
 
@@ -206,8 +212,12 @@ async def get_warehouses_overview(db: AsyncSession = Depends(get_db)) -> Dict[st
 
 
 @router.post("")
-async def add_warehouse(payload: WarehouseCreate, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
-    """Adds a new warehouse distribution center or reactivates a decommissioned one."""
+async def add_warehouse(
+    payload: WarehouseCreate,
+    current_user: User = Depends(require_permission("warehouses.manage")),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Adds a new warehouse to PostgreSQL and initializes inventory structures (Admin Only)."""
     wh_id = payload.id.strip().upper()
     existing_res = await db.execute(select(Warehouse).where(Warehouse.id == wh_id))
     existing_wh = existing_res.scalars().first()
@@ -300,8 +310,13 @@ async def add_warehouse(payload: WarehouseCreate, db: AsyncSession = Depends(get
 
 
 @router.put("/{id}")
-async def update_warehouse(id: str, payload: WarehouseUpdate, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
-    """Updates existing warehouse parameters."""
+async def update_warehouse(
+    id: str,
+    payload: WarehouseUpdate,
+    current_user: User = Depends(require_permission("warehouses.manage")),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Updates existing warehouse parameters (Admin Only)."""
     res = await db.execute(select(Warehouse).where(Warehouse.id == id))
     wh = res.scalars().first()
     if not wh:
@@ -336,56 +351,74 @@ async def update_warehouse(id: str, payload: WarehouseUpdate, db: AsyncSession =
 
 
 @router.delete("/{id}")
-async def delete_warehouse(id: str, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
-    """Decommissions (soft-deletes) a warehouse and cascades invalidation to pending actions."""
+async def delete_warehouse(
+    id: str,
+    current_user: User = Depends(require_permission("warehouses.manage")),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Permanently deletes a warehouse from the database and cascades deletion to all
+    dependent rows across inventory, batches, transactions, transfers, alerts, and forecasts.
+    """
     res = await db.execute(select(Warehouse).where(Warehouse.id == id))
     wh = res.scalars().first()
     if not wh:
-        raise HTTPException(status_code=404, detail=f"Warehouse '{id}' not found.")
+        raise HTTPException(status_code=404, detail=f"Warehouse with ID '{id}' not found in database.")
 
-    wh.is_active = False
-    wh.status = "Decommissioned"
+    wh_name = wh.name
 
-    # Invalidate / cancel pending recommended transfers referencing this warehouse
-    trfs_res = await db.execute(
-        select(InventoryTransfer).where(
+    # 1. Delete dependent alerts & notification logs / escalations for this warehouse
+    alert_ids_res = await db.execute(select(Alert.id).where(Alert.warehouse_id == id))
+    alert_ids = alert_ids_res.scalars().all()
+    if alert_ids:
+        await db.execute(delete(NotificationLog).where(NotificationLog.alert_id.in_(alert_ids)))
+        await db.execute(delete(AlertEscalation).where(AlertEscalation.alert_id.in_(alert_ids)))
+        await db.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
+
+    # 2. Delete transfers referencing this warehouse as source or destination
+    await db.execute(
+        delete(InventoryTransfer).where(
             or_(
                 InventoryTransfer.source_warehouse_id == id,
                 InventoryTransfer.destination_warehouse_id == id
-            ),
-            InventoryTransfer.status == "RECOMMENDED"
+            )
         )
     )
-    for t in trfs_res.scalars().all():
-        t.status = "CANCELLED"
 
-    # Invalidate / cancel pending replenishment recommendations for this warehouse
-    recs_res = await db.execute(
-        select(ReplenishmentRecommendation).where(
-            ReplenishmentRecommendation.warehouse_id == id,
-            ReplenishmentRecommendation.status == "PENDING"
-        )
-    )
-    for r in recs_res.scalars().all():
-        r.status = "CANCELLED"
+    # 3. Delete purchase orders and replenishment recommendations
+    await db.execute(delete(PurchaseOrder).where(PurchaseOrder.warehouse_id == id))
+    await db.execute(delete(ReplenishmentRecommendation).where(ReplenishmentRecommendation.warehouse_id == id))
 
-    # Invalidate active alerts for this warehouse
-    alerts_res = await db.execute(
-        select(Alert).where(Alert.warehouse_id == id, Alert.status != "Resolved")
-    )
-    for a in alerts_res.scalars().all():
-        a.status = "Resolved"
+    # 4. Delete risk & forecasting artifacts
+    await db.execute(delete(InventoryRisk).where(InventoryRisk.warehouse_id == id))
+    await db.execute(delete(DemandSurgeEvent).where(DemandSurgeEvent.warehouse_id == id))
+    await db.execute(delete(ForecastRecord).where(ForecastRecord.warehouse_id == id))
+    await db.execute(delete(DemandSignal).where(DemandSignal.warehouse_id == id))
 
+    # 5. Delete demand history, distributor orders, sales orders, transactions, batches, inventory
+    await db.execute(delete(DistributorOrder).where(DistributorOrder.warehouse_id == id))
+    await db.execute(delete(DemandHistory).where(DemandHistory.warehouse_id == id))
+    await db.execute(delete(InventoryTransaction).where(InventoryTransaction.warehouse_id == id))
+    await db.execute(delete(Batch).where(Batch.warehouse_id == id))
+    await db.execute(delete(Inventory).where(Inventory.warehouse_id == id))
+
+    # 6. Delete warehouse master record
+    await db.execute(delete(Warehouse).where(Warehouse.id == id))
     await db.commit()
 
+    # Clear ML prediction cache
+    PredictionService.invalidate_cache()
+
+    # Broadcast WebSocket update
     await ws_manager.broadcast({
-        "event": "WAREHOUSE_DECOMMISSIONED",
-        "warehouse_id": wh.id,
-        "name": wh.name
+        "event": "WAREHOUSE_DELETED",
+        "warehouse_id": id,
+        "name": wh_name,
+        "message": f"Warehouse '{wh_name}' ({id}) has been permanently deleted from the database."
     })
 
     return {
         "success": True,
-        "warehouse_id": wh.id,
-        "message": f"Warehouse '{wh.name}' ({wh.id}) decommissioned successfully."
+        "warehouse_id": id,
+        "message": f"Warehouse '{wh_name}' ({id}) deleted successfully from database."
     }

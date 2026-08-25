@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.app.database import get_db
 from backend.app.models.alert import Alert
@@ -12,6 +12,7 @@ from backend.app.models.transaction import InventoryTransaction
 from backend.app.schemas.alert import AlertActionRequest
 from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
 from backend.app.routers.ws import ws_manager
+from backend.app.utils.timezone import get_now_ist, get_today_ist, format_ist_datetime, format_ist_date
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
 
@@ -101,7 +102,8 @@ async def get_alerts_overview(
             "owner": a.owner,
             "escalationLevel": a.escalation_level,
             "isEscalated": a.is_escalated,
-            "createdAt": a.created_at.strftime("%Y-%m-%d %H:%M")
+            "createdAt": format_ist_datetime(a.created_at),
+            "createdAtRaw": a.created_at.isoformat() if a.created_at else None
         })
 
     # Dynamic Alert Type Distribution from DB
@@ -115,9 +117,12 @@ async def get_alerts_overview(
         "Stockout Risk": "#D64545",
         "Low Stock": "#E58A24",
         "Expiry Risk": "#D5A72C",
+        "Demand Surge": "#177A5B",
         "Demand Spike": "#177A5B",
         "Supplier Delay": "#68716D",
-        "Temperature Breach": "#9333EA"
+        "Temperature Breach": "#9333EA",
+        "Critical Shortage": "#D64545",
+        "Overstock": "#3B82F6"
     }
 
     alerts_by_type = [
@@ -152,7 +157,7 @@ async def get_alerts_overview(
             "id": e.id,
             "text": f"Alert {e.alert_id} escalated to L{e.to_level} ({e.assigned_to})",
             "detail": e.reason or e.action_taken,
-            "time": e.escalated_at.strftime("%I:%M %p"),
+            "time": format_ist_datetime(e.escalated_at, fmt="%I:%M %p IST"),
             "status": e.status
         }
         for e in escalations
@@ -166,7 +171,7 @@ async def get_alerts_overview(
                 "id": f"TX-{tx.id}",
                 "text": f"{tx.transaction_type}: {tx.quantity:,} units {tx.sku} @ {tx.warehouse_id}",
                 "detail": tx.reason or "Stock movement logged",
-                "time": tx.timestamp.strftime("%I:%M %p"),
+                "time": format_ist_datetime(tx.timestamp, fmt="%I:%M %p IST"),
                 "status": "COMPLETED"
             }
             for tx in txs
@@ -203,21 +208,24 @@ async def handle_alert_action(
 
     action_type = payload.action.lower().strip()
 
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
     if action_type in ["resolve", "mark resolved", "resolved"]:
         alert.status = "Resolved"
         alert.is_escalated = False
+        alert.resolved_at = now_utc
         
         # Log resolution escalation
         esc = AlertEscalation(
-            id=f"ESC-{int(datetime.utcnow().timestamp())}",
+            id=f"ESC-{int(now_utc.timestamp())}",
             alert_id=alert.id,
             from_level=alert.escalation_level,
             to_level=alert.escalation_level,
             assigned_to=payload.performed_by or "Lead Planner",
             reason=f"Alert resolved by {payload.performed_by or 'Planner'}",
             action_taken=payload.notes or "Operational corrective action executed.",
-            sla_deadline=datetime.utcnow(),
-            escalated_at=datetime.utcnow(),
+            sla_deadline=now_utc,
+            escalated_at=now_utc,
             status="RESOLVED"
         )
         db.add(esc)
@@ -230,15 +238,15 @@ async def handle_alert_action(
         alert.is_escalated = True
         
         esc = AlertEscalation(
-            id=f"ESC-{int(datetime.utcnow().timestamp())}",
+            id=f"ESC-{int(now_utc.timestamp())}",
             alert_id=alert.id,
             from_level=alert.escalation_level - 1,
             to_level=alert.escalation_level,
             assigned_to=f"Tier-{alert.escalation_level} SCM Executive",
             reason=payload.notes or f"Manual escalation to Level {alert.escalation_level} by {payload.performed_by}",
             action_taken="Expedited executive decision requested.",
-            sla_deadline=datetime.utcnow() + timedelta(hours=4),
-            escalated_at=datetime.utcnow(),
+            sla_deadline=now_utc + timedelta(hours=4),
+            escalated_at=now_utc,
             status="IN_PROGRESS"
         )
         db.add(esc)

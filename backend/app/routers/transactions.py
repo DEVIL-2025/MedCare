@@ -1,19 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_, or_, cast, String
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.app.database import get_db
 from backend.app.schemas.transaction import TransactionCreate, TransactionResponse
 from backend.app.models.transaction import InventoryTransaction
 from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
+from backend.app.models.transfer import InventoryTransfer
 from backend.app.engines.inventory_engine import InventoryEngine
 from backend.app.engines.risk_engine import RiskEngine
 from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
+from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
+from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.services.notification_service import NotificationService
 from backend.app.routers.ws import ws_manager
+from backend.app.utils.timezone import get_utc_now, format_ist_datetime
 
 router = APIRouter(prefix="/api/transactions", tags=["Transactions"])
 
@@ -25,18 +29,29 @@ async def create_transaction(
 ):
     """
     Executes an atomic inventory transaction (SALE, CONSUMPTION, RECEIPT, ADJUSTMENT, TRANSFER).
-    Triggers inventory update -> risk recalculation -> alert checks -> WebSocket broadcast.
+    For Inter-DC Transfers:
+    - Atomically decrements source warehouse stock and batch
+    - Atomically increments destination warehouse stock and batch
+    - Recalculates inventory risk on both source and destination
+    - Synchronizes alerts and recommended transfers
+    - Broadcasts live WebSocket event
     """
     try:
-        if payload.transaction_type in ["TRANSFER_OUT", "TRANSFER"] or payload.destination_warehouse_id:
-            dest_wh = (payload.destination_warehouse_id or "").strip().upper()
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        tx_type_upper = payload.transaction_type.strip().upper()
+        has_dest_wh = payload.destination_warehouse_id and payload.destination_warehouse_id.strip() != ""
+        is_transfer = (tx_type_upper in ["TRANSFER", "TRANSFER_OUT", "INTER_DC_TRANSFER"] and has_dest_wh) or (tx_type_upper == "TRANSFER")
+
+        if is_transfer:
             src_wh = payload.warehouse_id.strip().upper()
+            dest_wh = (payload.destination_warehouse_id or "").strip().upper()
             if not dest_wh or dest_wh == src_wh:
                 raise ValueError("Destination warehouse is required and must be different from source warehouse for Inter-DC transfers.")
 
             ref_id = payload.reference_id or f"TRF-{payload.sku.upper()}-{src_wh}-{dest_wh}"
 
-            # 1. Deduct from source warehouse
+            # 1. Deduct from source warehouse atomically
             tx_out, inv_src = await InventoryEngine.process_transaction(
                 session=db,
                 transaction_type="TRANSFER_OUT",
@@ -49,7 +64,7 @@ async def create_transaction(
                 performed_by=payload.performed_by or "Planner"
             )
 
-            # 2. Add to destination warehouse
+            # 2. Add to destination warehouse atomically
             tx_in, inv_dst = await InventoryEngine.process_transaction(
                 session=db,
                 transaction_type="TRANSFER_IN",
@@ -62,11 +77,30 @@ async def create_transaction(
                 performed_by=payload.performed_by or "Planner"
             )
 
-            # Recalculate Risk & Alerts for both DCs
+            # 3. Mark matching RECOMMENDED transfer as COMPLETED
+            trf_match_res = await db.execute(
+                select(InventoryTransfer).where(
+                    and_(
+                        InventoryTransfer.sku == payload.sku,
+                        InventoryTransfer.source_warehouse_id == src_wh,
+                        InventoryTransfer.destination_warehouse_id == dest_wh,
+                        InventoryTransfer.status == "RECOMMENDED"
+                    )
+                )
+            )
+            matching_trf = trf_match_res.scalars().first()
+            if matching_trf:
+                matching_trf.status = "COMPLETED"
+                matching_trf.dispatched_at = now_utc
+                matching_trf.received_at = now_utc
+
+            # Recalculate Risk, Alerts, Transfers & Replenishment Recommendations for network
             await RiskEngine.evaluate_inventory_risk(db, payload.sku, src_wh)
             await RiskEngine.evaluate_inventory_risk(db, payload.sku, dest_wh)
             await AlertEscalationEngine.sync_inventory_alerts(db, sku=payload.sku, warehouse_id=src_wh)
             await AlertEscalationEngine.sync_inventory_alerts(db, sku=payload.sku, warehouse_id=dest_wh)
+            await NetworkBalancingEngine.identify_network_transfers(db)
+            await ReplenishmentEngine.sync_recommendations(db)
 
             await db.commit()
 
@@ -106,6 +140,10 @@ async def create_transaction(
                 "days_of_cover": inv_dst.days_of_cover,
                 "timestamp": tx_in.timestamp.isoformat()
             })
+            await ws_manager.broadcast({
+                "event": "REPLENISHMENT_UPDATED",
+                "timestamp": now_utc.isoformat()
+            })
 
             return {
                 "success": True,
@@ -116,11 +154,14 @@ async def create_transaction(
                 "destination_warehouse_id": dest_wh,
                 "previous_stock": tx_out.previous_stock,
                 "new_stock": inv_src.current_stock,
+                "destination_previous_stock": tx_in.previous_stock,
+                "destination_new_stock": inv_dst.current_stock,
                 "current_status": inv_src.status,
                 "days_of_cover": inv_src.days_of_cover,
                 "message": f"Successfully transferred {payload.quantity:,} units of {payload.sku} from {src_wh} to {dest_wh}."
             }
 
+        # Handle other standard transaction types (SALE, RECEIPT, ADJUSTMENT, CONSUMPTION)
         tx, inv = await InventoryEngine.process_transaction(
             session=db,
             transaction_type=payload.transaction_type,
@@ -149,6 +190,10 @@ async def create_transaction(
                 message=f"Stock for {payload.sku} at {payload.warehouse_id} has dropped to 0 units."
             )
 
+        # Recalculate Recommendations & Network Transfers dynamically
+        await NetworkBalancingEngine.identify_network_transfers(db)
+        await ReplenishmentEngine.sync_recommendations(db)
+
         await db.commit()
 
         # Broadcast live event via WebSocket
@@ -167,6 +212,10 @@ async def create_transaction(
             "timestamp": tx.timestamp.isoformat()
         }
         await ws_manager.broadcast(event_payload)
+        await ws_manager.broadcast({
+            "event": "REPLENISHMENT_UPDATED",
+            "timestamp": now_utc.isoformat()
+        })
 
         return {
             "success": True,
@@ -194,10 +243,18 @@ async def create_transaction(
 async def get_transactions(
     sku: Optional[str] = None,
     warehouse: Optional[str] = None,
-    limit: int = Query(50, le=200),
+    search: Optional[str] = None,
+    transaction_type: Optional[str] = None,
+    limit: int = Query(10, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db)
 ):
-    """Returns recent transaction log with product names and details."""
+    """
+    Returns transaction history from PostgreSQL supporting:
+    - Default compact 10-record initial view
+    - Dynamic multi-field database search (SKU, Name, Warehouse, Type, Reference, Reason, PerformedBy, ID)
+    - Dynamic pagination / expansion (limit & offset)
+    """
     query = (
         select(InventoryTransaction, Product)
         .join(Product, InventoryTransaction.sku == Product.sku)
@@ -209,8 +266,24 @@ async def get_transactions(
         query = query.where(InventoryTransaction.sku == sku)
     if warehouse and warehouse != "All":
         query = query.where(InventoryTransaction.warehouse_id == warehouse)
+    if transaction_type and transaction_type != "All":
+        query = query.where(InventoryTransaction.transaction_type == transaction_type)
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                InventoryTransaction.sku.ilike(term),
+                Product.name.ilike(term),
+                InventoryTransaction.warehouse_id.ilike(term),
+                InventoryTransaction.transaction_type.ilike(term),
+                InventoryTransaction.reference_id.ilike(term),
+                InventoryTransaction.reason.ilike(term),
+                InventoryTransaction.performed_by.ilike(term),
+                cast(InventoryTransaction.id, String).ilike(term)
+            )
+        )
 
-    query = query.order_by(InventoryTransaction.timestamp.desc()).limit(limit)
+    query = query.order_by(InventoryTransaction.timestamp.desc()).offset(offset).limit(limit)
     res = await db.execute(query)
     records = res.all()
 
@@ -229,7 +302,7 @@ async def get_transactions(
             "reason": tx.reason or "-",
             "performedBy": tx.performed_by,
             "timestamp": tx.timestamp.isoformat() if hasattr(tx.timestamp, "isoformat") else str(tx.timestamp),
-            "formattedTime": tx.timestamp.strftime("%Y-%m-%d %H:%M:%S") if hasattr(tx.timestamp, "strftime") else str(tx.timestamp)
+            "formattedTime": format_ist_datetime(tx.timestamp)
         }
         for tx, prod in records
     ]

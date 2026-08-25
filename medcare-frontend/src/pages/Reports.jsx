@@ -8,6 +8,7 @@ import ErrorState from '../components/ui/ErrorState';
 import EmptyState from '../components/ui/EmptyState';
 import { api } from '../api/client';
 import { useControlTower } from '../context/ControlTowerContext';
+import { formatDateTime, formatDate } from '../utils/dateUtils';
 
 const REPORT_TYPES = [
   'All Reports',
@@ -95,6 +96,7 @@ export default function Reports() {
       ['Warehouse Scope', warehouseFilter],
       ['Category Filter', categoryFilter],
       ['Time Period Window', timePeriod],
+      ['Generation Timestamp (IST)', formatDateTime(data?.server_time || new Date())],
       [''],
       ['Metric', 'Value'],
       ['Total Inventory Value', data.kpis?.total_inventory_value || '₹0 Cr'],
@@ -127,14 +129,27 @@ export default function Reports() {
   const inventory_value_trend = data?.inventory_value_trend || [];
   const aging_summary = data?.aging_summary || [];
   const top_categories_by_consumption = data?.top_categories_by_consumption || [];
+  const stockout_by_warehouse = data?.stockout_by_warehouse || [];
   const business_impact = metricsData?.business_impact || {};
+
+  const showValuation = reportType === 'All Reports' || reportType === 'Executive Valuation Audit';
+  const showAging = reportType === 'All Reports' || reportType === 'FEFO Expiry Risk Report';
+  const showStockouts = reportType === 'All Reports' || reportType === 'DC Stockout Analysis';
+  const showCategories = reportType === 'All Reports' || reportType === 'Therapeutic Category Consumption';
 
   return (
     <div className="space-y-5">
       {/* Top Header & Export Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-lg border border-ink-100 shadow-card">
         <div>
-          <h2 className="text-[16px] font-bold text-ink-900">Supply Chain Analytics & Financial ROI Audit</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-[16px] font-bold text-ink-900">Supply Chain Analytics & Financial ROI Audit</h2>
+            {data?.formatted_server_time && (
+              <span className="text-[10.5px] px-2 py-0.5 rounded bg-cream-200 text-ink-600 font-mono">
+                {data.formatted_server_time}
+              </span>
+            )}
+          </div>
           <p className="text-[12px] text-ink-500">Live PostgreSQL valuation trends, FEFO batch aging distributions, and before-vs-after ROI metrics.</p>
         </div>
         <button
@@ -223,91 +238,155 @@ export default function Reports() {
       </div>
 
       {/* Business Impact ROI Comparison Table */}
-      <div className="bg-white rounded-lg border-2 border-forest-600/30 shadow-card p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-[15px] font-bold text-ink-900 flex items-center gap-1.5">
-              <Sparkles size={16} className="text-forest-700" /> SCM Control Tower Business Impact & Transformation
-            </h3>
-            <p className="text-[12px] text-ink-500">Measurable improvements comparing traditional siloed operations vs the MedCare Control Tower.</p>
+      {(reportType === 'All Reports' || reportType === 'Executive Valuation Audit') && (
+        <div className="bg-white rounded-lg border-2 border-forest-600/30 shadow-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-[15px] font-bold text-ink-900 flex items-center gap-1.5">
+                <Sparkles size={16} className="text-forest-700" /> SCM Control Tower Business Impact & Transformation
+              </h3>
+              <p className="text-[12px] text-ink-500">Measurable improvements comparing traditional siloed operations vs the MedCare Control Tower.</p>
+            </div>
+            <Badge tone="forest">Annual ROI: {business_impact.roi_multiple || '6.8x'}</Badge>
           </div>
-          <Badge tone="forest">Annual ROI: {business_impact.roi_multiple || '6.8x'}</Badge>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-[12.5px]">
-            <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
-              <tr>
-                <th className="py-2.5 px-3">Performance Metric</th>
-                <th className="py-2.5 px-3">Traditional Baseline</th>
-                <th className="py-2.5 px-3 font-semibold text-forest-900">MedCare Control Tower</th>
-                <th className="py-2.5 px-3 font-semibold text-forest-800 text-right">Business Impact</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100">
-              {business_impact.before_vs_after && business_impact.before_vs_after.map((row, i) => (
-                <tr key={i} className="hover:bg-cream-100/60 transition-colors">
-                  <td className="py-2.5 px-3 font-medium text-ink-900">{row.metric}</td>
-                  <td className="py-2.5 px-3 text-ink-500 line-through">{row.baseline}</td>
-                  <td className="py-2.5 px-3 font-bold text-forest-800">{row.control_tower}</td>
-                  <td className="py-2.5 px-3 text-right">
-                    <span className="font-semibold text-forest-700 bg-forest-100 px-2 py-0.5 rounded text-[11.5px]">
-                      {row.improvement}
-                    </span>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[12.5px]">
+              <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
+                <tr>
+                  <th className="py-2.5 px-3">Performance Metric</th>
+                  <th className="py-2.5 px-3">Traditional Baseline</th>
+                  <th className="py-2.5 px-3 font-semibold text-forest-900">MedCare Control Tower</th>
+                  <th className="py-2.5 px-3 font-semibold text-forest-800 text-right">Business Impact</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {business_impact.before_vs_after && business_impact.before_vs_after.map((row, i) => (
+                  <tr key={i} className="hover:bg-cream-100/60 transition-colors">
+                    <td className="py-2.5 px-3 font-medium text-ink-900">{row.metric}</td>
+                    <td className="py-2.5 px-3 text-ink-500 line-through">{row.baseline}</td>
+                    <td className="py-2.5 px-3 font-bold text-forest-800">{row.control_tower}</td>
+                    <td className="py-2.5 px-3 text-right">
+                      <span className="font-semibold text-forest-700 bg-forest-100 px-2 py-0.5 rounded text-[11.5px]">
+                        {row.improvement}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Valuation Trend & Aging Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Inventory Value Trend */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">Live Inventory Valuation Trend (₹ Lakhs)</h3>
-          <div className="h-64">
-            {inventory_value_trend.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={inventory_value_trend} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E5E1" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#68716D' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#68716D' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid #E2E5E1', fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 12, color: '#68716D' }} />
-                  <Line type="monotone" dataKey="total" stroke="#177A5B" strokeWidth={2.5} name="Total Valuation (₹ L)" dot={false} />
-                  <Line type="monotone" dataKey="usable" stroke="#2E8B68" strokeWidth={2} strokeDasharray="4 3" name="Healthy Stock (₹ L)" dot={false} />
-                  <Line type="monotone" dataKey="atRisk" stroke="#D64545" strokeWidth={2} name="Near-Expiry Risk (₹ L)" dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyState title="No Trend Data" description="No demand history records in selected time window." />
-            )}
-          </div>
-        </div>
-
-        {/* Batch Aging Distribution */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">FEFO Batch Expiry Aging Breakdown</h3>
-          <div className="space-y-3 pt-2 text-[12px]">
-            {aging_summary.map((item, i) => (
-              <div key={i} className="space-y-1">
-                <div className="flex justify-between text-ink-700">
-                  <span className="font-semibold text-ink-900">{item.bucket}</span>
-                  <span className="font-bold text-ink-800">{Number(item.units || 0).toLocaleString()} units ({item.pct}%)</span>
-                </div>
-                <div className="w-full bg-cream-200 rounded-full h-2">
-                  <div
-                    className="h-2 rounded-full"
-                    style={{ width: `${item.pct}%`, backgroundColor: item.color || '#177A5B' }}
-                  />
-                </div>
+      {(showValuation || showAging) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {/* Inventory Value Trend */}
+          {showValuation && (
+            <div className={`bg-white rounded-lg border border-ink-100 shadow-card p-4 ${!showAging ? 'lg:col-span-2' : ''}`}>
+              <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">Live Inventory Valuation Trend (₹ Lakhs)</h3>
+              <div className="h-64">
+                {inventory_value_trend.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={inventory_value_trend} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E5E1" vertical={false} />
+                      <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#68716D' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: '#68716D' }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid #E2E5E1', fontSize: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 12, color: '#68716D' }} />
+                      <Line type="monotone" dataKey="total" stroke="#177A5B" strokeWidth={2.5} name="Total Valuation (₹ L)" dot={false} />
+                      <Line type="monotone" dataKey="usable" stroke="#2E8B68" strokeWidth={2} strokeDasharray="4 3" name="Healthy Stock (₹ L)" dot={false} />
+                      <Line type="monotone" dataKey="atRisk" stroke="#D64545" strokeWidth={2} name="Near-Expiry Risk (₹ L)" dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState title="No Trend Data" description="No demand history records in selected time window." />
+                )}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {/* Batch Aging Distribution */}
+          {showAging && (
+            <div className={`bg-white rounded-lg border border-ink-100 shadow-card p-4 ${!showValuation ? 'lg:col-span-2' : ''}`}>
+              <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">FEFO Batch Expiry Aging Breakdown</h3>
+              <div className="space-y-3 pt-2 text-[12px]">
+                {aging_summary.map((item, i) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-between text-ink-700">
+                      <span className="font-semibold text-ink-900">{item.bucket}</span>
+                      <span className="font-bold text-ink-800">{Number(item.units || 0).toLocaleString()} units ({item.pct}%)</span>
+                    </div>
+                    <div className="w-full bg-cream-200 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full"
+                        style={{ width: `${item.pct}%`, backgroundColor: item.color || '#177A5B' }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
+
+      {/* Category Consumption & DC Stockout Breakdown */}
+      {(showCategories || showStockouts) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {/* Category Consumption */}
+          {showCategories && (
+            <div className={`bg-white rounded-lg border border-ink-100 shadow-card p-4 ${!showStockouts ? 'lg:col-span-2' : ''}`}>
+              <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">Therapeutic Category Consumption (Value In Window)</h3>
+              <div className="space-y-3 pt-2 text-[12px]">
+                {top_categories_by_consumption.length > 0 ? (
+                  top_categories_by_consumption.map((item, i) => (
+                    <div key={i} className="space-y-1">
+                      <div className="flex justify-between text-ink-700">
+                        <span className="font-semibold text-ink-900">{item.name}</span>
+                        <span className="font-bold text-forest-800">{item.display}</span>
+                      </div>
+                      <div className="w-full bg-cream-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full"
+                          style={{
+                            width: `${Math.min(100, Math.max(5, (item.value / (top_categories_by_consumption[0]?.value || 1)) * 100))}%`,
+                            backgroundColor: item.color || '#177A5B'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-ink-400 text-[12px]">No category consumption recorded in this timeframe.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* DC Stockout Incidents */}
+          {showStockouts && (
+            <div className={`bg-white rounded-lg border border-ink-100 shadow-card p-4 ${!showCategories ? 'lg:col-span-2' : ''}`}>
+              <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">Distribution Center Stockout Incidents</h3>
+              <div className="space-y-2.5 pt-2 text-[12px]">
+                {stockout_by_warehouse.length > 0 ? (
+                  stockout_by_warehouse.map((wh, i) => (
+                    <div key={i} className="flex items-center justify-between p-2.5 rounded bg-cream-100/60 border border-ink-100">
+                      <div className="font-semibold text-ink-900">{wh.warehouse}</div>
+                      <Badge tone={wh.count > 10 ? 'critical' : wh.count > 0 ? 'warning' : 'good'}>
+                        {wh.count} Stockout Alerts
+                      </Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-ink-400 text-[12px]">No active stockout incidents logged across active DCs.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

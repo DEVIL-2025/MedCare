@@ -12,6 +12,7 @@ from backend.app.models.demand import DemandHistory
 from backend.app.models.alert import Alert
 from backend.app.models.replenishment import ReplenishmentRecommendation
 from backend.app.engines.expiry_fefo_engine import ExpiryFEFOEngine
+from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime, format_ist_date
 
 router = APIRouter(prefix="/api/reports", tags=["Reports"])
 
@@ -29,7 +30,7 @@ async def get_reports_summary(
     category consumptions, and stockout incident aggregations from PostgreSQL.
     Strictly applies warehouse, category, time period, and report type filters.
     """
-    today = date(2026, 8, 24)
+    today = get_today_ist()
 
     # 1. Parse time period window
     days_back = 14
@@ -230,5 +231,7 @@ async def get_reports_summary(
             "warehouse": warehouse,
             "category": category,
             "time_period": time_period
-        }
+        },
+        "server_time": get_now_ist().isoformat(),
+        "formatted_server_time": format_ist_datetime(get_now_ist())
     }

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, case
 from datetime import date, timedelta
 from typing import Dict, Any, Optional, List
 
@@ -14,7 +14,10 @@ from backend.app.models.transfer import InventoryTransfer
 from backend.app.models.demand import DemandHistory
 from backend.app.engines.inventory_engine import InventoryEngine
 from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
+from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
+from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.ml.predict import PredictionService
+from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -23,15 +26,18 @@ router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 async def get_dashboard_data(
     warehouse: Optional[str] = Query("All"),
     db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+):
     """
     Dynamically computes aggregated KPIs, live demand vs inventory chart data,
     transfer recommendations, at-risk SKUs, warehouse health, and alert counts from the database.
     Supports network-wide aggregation ('All') and DC-specific filtering.
     """
-    today = date(2026, 8, 24)
+    today = get_today_ist()
 
-    # 0. Synchronize alerts with current live inventory state
+    # 0. Dynamically synchronize transfers, replenishment recommendations, and alerts with live DB state
+    all_forecasts = await PredictionService.predict_all_demands(db, 30)
+    await NetworkBalancingEngine.identify_network_transfers(db, precomputed_forecasts=all_forecasts)
+    await ReplenishmentEngine.sync_recommendations(db, warehouse_id=warehouse, precomputed_forecasts=all_forecasts)
     await AlertEscalationEngine.sync_inventory_alerts(db, warehouse_id=warehouse)
     await db.commit()
 
@@ -85,7 +91,8 @@ async def get_dashboard_data(
     thirty_days_ago = today - timedelta(days=30)
     dh_query = (
         select(DemandHistory.date, func.sum(DemandHistory.actual_sales).label("daily_sales"))
-        .where(DemandHistory.date >= thirty_days_ago)
+        .join(Warehouse, DemandHistory.warehouse_id == Warehouse.id)
+        .where(Warehouse.is_active != False, DemandHistory.date >= thirty_days_ago)
     )
     if warehouse and warehouse != "All":
         dh_query = dh_query.where(DemandHistory.warehouse_id == warehouse)
@@ -133,7 +140,7 @@ async def get_dashboard_data(
             "reorderPoint": int(avg_reorder_point)
         })
 
-    # 6. Executive Recommendation Card (Queried from DB Transfers & Recommendations)
+    # 6. Executive Recommendation Card (Highest priority current action from DB)
     active_wh_subquery = select(Warehouse.id).where(Warehouse.is_active != False)
     trf_query = (
         select(InventoryTransfer, Product)
@@ -144,6 +151,7 @@ async def get_dashboard_data(
             InventoryTransfer.destination_warehouse_id.in_(active_wh_subquery),
             InventoryTransfer.status == "RECOMMENDED"
         )
+        .order_by(InventoryTransfer.estimated_savings_inr.desc())
     )
     if warehouse and warehouse != "All":
         trf_query = trf_query.where(
@@ -172,26 +180,48 @@ async def get_dashboard_data(
             "expected_impact": "Prevents stockout, utilizes near-expiry stock, saves emergency purchase costs.",
             "savings": savings_str
         }
-    elif recs:
-        # Fallback to top replenishment recommendation if no transfer exists
-        first_rec = recs[0]
-        prod_res = await db.execute(select(Product).where(Product.sku == first_rec.sku))
-        prod = prod_res.scalars().first()
-        prod_name = prod.name if prod else first_rec.sku
-        cost_str = f"₹{first_rec.estimated_cost_inr / 100000.0:.2f} Lakhs" if first_rec.estimated_cost_inr >= 100000 else f"₹{first_rec.estimated_cost_inr:,.0f}"
-        executive_recommendation = {
-            "id": first_rec.id,
-            "action_type": "replenishment",
-            "transfer_id": None,
-            "recommendation_id": first_rec.id,
-            "what": f"Replenish {first_rec.recommended_quantity:,} units of {prod_name} for {first_rec.warehouse_id}",
-            "product": f"{prod_name} ({first_rec.sku})",
-            "from": first_rec.preferred_source or "SUPPLIER",
-            "to": first_rec.warehouse_id,
-            "why": first_rec.reason_why or "Stock level below dynamic safety stock threshold.",
-            "expected_impact": first_rec.reason_impact or "Restores safe days of cover.",
-            "savings": cost_str
-        }
+    else:
+        # Query top replenishment recommendation prioritized by urgency (critical > high > medium > low) and estimated cost
+        priority_case = case(
+            (ReplenishmentRecommendation.priority == "critical", 1),
+            (ReplenishmentRecommendation.priority == "high", 2),
+            (ReplenishmentRecommendation.priority == "medium", 3),
+            (ReplenishmentRecommendation.priority == "low", 4),
+            else_=5
+        )
+        rec_prio_query = (
+            select(ReplenishmentRecommendation, Product)
+            .join(Product, ReplenishmentRecommendation.sku == Product.sku)
+            .join(Warehouse, ReplenishmentRecommendation.warehouse_id == Warehouse.id)
+            .where(
+                Warehouse.is_active != False,
+                Product.is_active != False,
+                ReplenishmentRecommendation.status == "PENDING"
+            )
+            .order_by(priority_case, ReplenishmentRecommendation.estimated_cost_inr.desc())
+        )
+        if warehouse and warehouse != "All":
+            rec_prio_query = rec_prio_query.where(ReplenishmentRecommendation.warehouse_id == warehouse)
+        
+        rec_prio_res = await db.execute(rec_prio_query)
+        rec_item = rec_prio_res.first()
+
+        if rec_item:
+            first_rec, prod = rec_item
+            cost_str = f"₹{first_rec.estimated_cost_inr / 100000.0:.2f} Lakhs" if first_rec.estimated_cost_inr >= 100000 else f"₹{first_rec.estimated_cost_inr:,.0f}"
+            executive_recommendation = {
+                "id": first_rec.id,
+                "action_type": "replenishment",
+                "transfer_id": None,
+                "recommendation_id": first_rec.id,
+                "what": f"Replenish {first_rec.recommended_quantity:,} units of {prod.name} for {first_rec.warehouse_id}",
+                "product": f"{prod.name} ({first_rec.sku})",
+                "from": first_rec.preferred_source or "HealthGen Pharma",
+                "to": first_rec.warehouse_id,
+                "why": first_rec.reason_why or "Stock level below dynamic safety stock threshold.",
+                "expected_impact": first_rec.reason_impact or "Restores safe days of cover.",
+                "savings": cost_str
+            }
 
     # 7. Top At-Risk SKUs from DB
     at_risk_list = []
@@ -270,5 +300,7 @@ async def get_dashboard_data(
         "top_at_risk_skus": at_risk_list[:8],
         "warehouse_health": warehouse_health[:6],
         "alert_summary": alert_summary,
-        "scope": warehouse
+        "scope": warehouse,
+        "server_time": get_now_ist().isoformat(),
+        "formatted_server_time": format_ist_datetime(get_now_ist())
     }

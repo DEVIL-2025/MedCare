@@ -1,18 +1,21 @@
 import { useState } from 'react';
-import { Bell, ChevronDown, RefreshCw, LogOut, UserCheck, Building2, Check, Sparkles } from 'lucide-react';
+import { Bell, ChevronDown, RefreshCw, LogOut, UserCheck, Building2, Check, Sparkles, ShieldCheck, Shield, Users, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useControlTower } from '../../context/ControlTowerContext';
+import { useLiveISTClock } from '../../utils/dateUtils';
 
-export default function Topbar({ title, subtitle, onOpenAssistant }) {
+export default function Topbar({ title, subtitle }) {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const { selectedWarehouse, setSelectedWarehouse, warehouses, activeAlertCount, triggerRefresh } = useControlTower();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [whDropdownOpen, setWhDropdownOpen] = useState(false);
+  const { dateString, timeString } = useLiveISTClock(1000);
 
-  function handleLogout() {
-    logout();
+  async function handleLogout() {
+    setDropdownOpen(false);
+    await logout();
     navigate('/login');
   }
 
@@ -26,6 +29,13 @@ export default function Topbar({ title, subtitle, onOpenAssistant }) {
         <p className="text-[13px] text-ink-500">{subtitle}</p>
       </div>
       <div className="flex items-center gap-2.5">
+        {/* Live IST System Clock */}
+        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-md bg-cream-100 border border-ink-100 text-[12px] font-mono text-ink-700 shadow-sm" title="Live Asia/Kolkata (IST, UTC+05:30) Current Time">
+          <Clock size={13} className="text-forest-700 animate-pulse" />
+          <span className="font-semibold text-ink-800">{dateString}</span>
+          <span className="text-ink-300">|</span>
+          <span className="text-forest-800 font-bold">{timeString}</span>
+        </div>
         {/* Dynamic Warehouse Selector Dropdown */}
         <div className="relative">
           <button
@@ -67,15 +77,6 @@ export default function Topbar({ title, subtitle, onOpenAssistant }) {
         </div>
 
         <button
-          onClick={onOpenAssistant}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-forest-600/30 bg-forest-50 hover:bg-forest-100 text-forest-800 text-[12px] font-semibold cursor-pointer transition-colors"
-          title="Open AI Supply Chain Assistant"
-        >
-          <Sparkles size={14} className="text-forest-700" />
-          <span className="hidden md:inline">AI Assistant</span>
-        </button>
-
-        <button
           onClick={triggerRefresh}
           className="p-1.5 rounded-md border border-ink-100 text-ink-500 hover:bg-cream-200 cursor-pointer transition-colors"
           title="Refresh Real-Time Data"
@@ -95,35 +96,58 @@ export default function Topbar({ title, subtitle, onOpenAssistant }) {
           )}
         </button>
 
-        {/* User Role Profile Menu */}
+        {/* User Profile Header Badge & Menu */}
         <div className="relative">
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-2 pl-2.5 border-l border-ink-100 hover:opacity-80 transition-opacity"
+            className="flex items-center gap-2 pl-2.5 border-l border-ink-100 hover:opacity-85 transition-opacity cursor-pointer"
           >
-            <div className="w-7 h-7 rounded-full bg-forest-700 text-white flex items-center justify-center text-xs font-bold">
-              {user?.avatar || 'P'}
+            <div className={`w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-bold ${
+              user?.role === 'ADMIN' ? 'bg-brick-600' : 'bg-forest-700'
+            }`}>
+              {user?.avatar || 'U'}
             </div>
-            <div className="text-[13px] leading-tight text-left">
-              <div className="text-ink-900 font-medium">{user?.name || 'Dr. Aditi Rao'}</div>
-              <div className="text-ink-500 text-[11px]">{user?.role || 'Lead Demand Planner'}</div>
+            <div className="text-[12.5px] leading-tight text-left">
+              <div className="text-ink-900 font-semibold">{user?.name || user?.full_name || 'SCM User'}</div>
+              <div className="flex items-center gap-1 text-[10.5px]">
+                <span className={`font-semibold ${user?.role === 'ADMIN' ? 'text-brick-700 font-bold' : 'text-forest-700'}`}>
+                  {user?.role || 'MANAGER'}
+                </span>
+                <span className="text-ink-400">•</span>
+                <span className="text-ink-500">{user?.roleLabel || (user?.role === 'ADMIN' ? 'Administrator' : 'Manager')}</span>
+              </div>
             </div>
             <ChevronDown size={12} className="text-ink-400" />
           </button>
 
           {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-48 bg-white border border-ink-100 rounded-md shadow-lg py-1 z-50 text-[12px]">
+            <div className="absolute right-0 mt-2 w-52 bg-white border border-ink-100 rounded-md shadow-xl py-1 z-50 text-[12px]">
+              <div className="px-3 py-2 border-b border-ink-100 bg-cream-100/60">
+                <div className="font-semibold text-ink-900">{user?.full_name || user?.name}</div>
+                <div className="text-[10.5px] text-ink-400 font-mono">{user?.email || user?.user_id}</div>
+              </div>
+
+              {isAdmin && (
+                <button
+                  onClick={() => { setDropdownOpen(false); navigate('/users'); }}
+                  className="w-full px-3 py-2 text-left text-ink-700 hover:bg-cream-200 flex items-center gap-2 cursor-pointer font-medium text-forest-800"
+                >
+                  <Users size={14} className="text-forest-700" /> User Management
+                </button>
+              )}
+
               <button
                 onClick={() => { setDropdownOpen(false); navigate('/settings'); }}
-                className="w-full px-3 py-2 text-left text-ink-700 hover:bg-cream-200 flex items-center gap-2"
+                className="w-full px-3 py-2 text-left text-ink-700 hover:bg-cream-200 flex items-center gap-2 cursor-pointer"
               >
-                <UserCheck size={14} /> Profile & Roles
+                <UserCheck size={14} /> System Settings & Roles
               </button>
+
               <button
                 onClick={handleLogout}
-                className="w-full px-3 py-2 text-left text-brick-600 hover:bg-brick-100 flex items-center gap-2 border-t border-ink-100"
+                className="w-full px-3 py-2 text-left text-brick-600 hover:bg-brick-50 flex items-center gap-2 border-t border-ink-100 cursor-pointer font-medium"
               >
-                <LogOut size={14} /> Switch User / Log Out
+                <LogOut size={14} /> Log Out / Switch User
               </button>
             </div>
           )}

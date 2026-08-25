@@ -30,7 +30,7 @@ function resolveValidWarehouseId(whValue, defaultObj, availableList, fallback = 
 }
 
 export default function RecordSaleModal({ open, onClose, defaultItem, onSaleRecorded }) {
-  const [sku, setSku] = useState(defaultItem?.sku || 'P-1042');
+  const [sku, setSku] = useState(defaultItem?.sku || 'P-1065');
   const [warehouse, setWarehouse] = useState(resolveValidWarehouseId(defaultItem?.warehouse, defaultItem, [], 'MUM-01'));
   const [quantity, setQuantity] = useState(150);
   const [customerName, setCustomerName] = useState('Apollo Hospitals Mumbai');

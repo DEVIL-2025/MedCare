@@ -26,7 +26,12 @@ from backend.app.engines.inventory_engine import InventoryEngine
 from backend.app.engines.expiry_fefo_engine import ExpiryFEFOEngine
 from backend.app.engines.risk_engine import RiskEngine
 from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
+from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
+from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.routers.ws import ws_manager
+from backend.app.dependencies.auth import require_permission, get_optional_user
+from backend.app.models.auth import User
+from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime, format_ist_date
 
 router = APIRouter(prefix="/api/inventory", tags=["Inventory"])
 
@@ -44,7 +49,7 @@ async def get_inventory(
     Returns inventory items with product master metadata, thresholds, status, and live per-batch expiry.
     When warehouse == 'All' and rollup is True, aggregates inventory by SKU and embeds per-DC breakdown.
     """
-    today = date(2026, 8, 24)
+    today = get_today_ist()
 
     query = (
         select(Inventory, Product)
@@ -283,10 +288,14 @@ async def get_products(db: AsyncSession = Depends(get_db)) -> List[Dict[str, Any
 
 
 @router.delete("/products/{sku}")
-async def delete_product(sku: str, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def delete_product(
+    sku: str,
+    current_user: User = Depends(require_permission("inventory.delete_product")),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
     """
     Permanently deletes a product from the database and cascades deletion to all
-    dependent rows across inventory, batches, transactions, transfers, alerts, and forecasts.
+    dependent rows across inventory, batches, transactions, transfers, alerts, and forecasts (Admin Only).
     """
     res = await db.execute(select(Product).where(Product.sku == sku))
     prod = res.scalars().first()
@@ -325,6 +334,11 @@ async def delete_product(sku: str, db: AsyncSession = Depends(get_db)) -> Dict[s
 
     # 5. Delete product master record
     await db.execute(delete(Product).where(Product.sku == sku))
+
+    # Recalculate recommendations & transfers
+    await NetworkBalancingEngine.identify_network_transfers(db)
+    await ReplenishmentEngine.sync_recommendations(db)
+
     await db.commit()
 
     # Clear ML prediction cache
@@ -336,6 +350,10 @@ async def delete_product(sku: str, db: AsyncSession = Depends(get_db)) -> Dict[s
         "sku": sku,
         "name": prod_name,
         "message": f"Product '{prod_name}' ({sku}) has been deleted from the database."
+    })
+    await ws_manager.broadcast({
+        "event": "REPLENISHMENT_UPDATED",
+        "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
     return {
@@ -376,7 +394,7 @@ async def add_product(payload: ProductCreate, db: AsyncSession = Depends(get_db)
     # Initialize inventory records across active warehouses
     wh_res = await db.execute(select(Warehouse).where(Warehouse.is_active != False))
     all_whs = wh_res.scalars().all()
-    today = date(2026, 8, 24)
+    today = get_today_ist()
 
     for w in all_whs:
         initial_qty = (
@@ -418,6 +436,10 @@ async def add_product(payload: ProductCreate, db: AsyncSession = Depends(get_db)
             )
             db.add(batch)
 
+    # Recalculate recommendations & transfers
+    await NetworkBalancingEngine.identify_network_transfers(db)
+    await ReplenishmentEngine.sync_recommendations(db)
+
     await db.commit()
 
     # Broadcast event
@@ -426,6 +448,10 @@ async def add_product(payload: ProductCreate, db: AsyncSession = Depends(get_db)
         "sku": new_prod.sku,
         "name": new_prod.name,
         "category": new_prod.category
+    })
+    await ws_manager.broadcast({
+        "event": "REPLENISHMENT_UPDATED",
+        "timestamp": now_utc.isoformat()
     })
 
     return {
@@ -444,16 +470,16 @@ async def record_sale(payload: SaleCreate, db: AsyncSession = Depends(get_db)) -
     2. Atomically decrements inventory stock and batch quantities (via FEFO)
     3. Logs inventory_transaction (type: SALE)
     4. Evaluates thresholds and triggers alerts if low/out of stock
-    5. Broadcasts live WebSocket event
+    5. Recalculates transfers & replenishment recommendations
+    6. Broadcasts live WebSocket event
     """
     prod_res = await db.execute(select(Product).where(Product.sku == payload.sku))
     prod = prod_res.scalars().first()
     if not prod:
         raise HTTPException(status_code=404, detail=f"Product with SKU '{payload.sku}' not found.")
 
-    unit_price = payload.unit_price or prod.unit_cost * 1.25  # Retail markup default
-    total_price = payload.quantity * unit_price
-    order_num = f"ORD-{int(datetime.utcnow().timestamp())}"
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    order_num = f"ORD-{int(now_utc.timestamp())}"
 
     try:
         # Deduct stock via inventory engine
@@ -468,9 +494,13 @@ async def record_sale(payload: SaleCreate, db: AsyncSession = Depends(get_db)) -
             performed_by="Sales Dispatch"
         )
 
+        # Compute pricing
+        unit_price = float(payload.unit_price) if payload.unit_price is not None else float(prod.unit_cost * 1.25)
+        total_price = round(unit_price * payload.quantity, 2)
+
         # Create SalesOrder record
         sale_order = SalesOrder(
-            id=f"SO-{int(datetime.utcnow().timestamp())}",
+            id=f"SO-{int(now_utc.timestamp())}",
             order_number=order_num,
             sku=payload.sku,
             warehouse_id=payload.warehouse_id,
@@ -480,13 +510,15 @@ async def record_sale(payload: SaleCreate, db: AsyncSession = Depends(get_db)) -
             customer_name=payload.customer_name,
             channel=payload.channel or "Hospital",
             status="COMPLETED",
-            created_at=datetime.utcnow()
+            created_at=now_utc
         )
         db.add(sale_order)
 
         # Recalculate Risk & Synchronize alerts dynamically
         await RiskEngine.evaluate_inventory_risk(db, payload.sku, payload.warehouse_id)
         await AlertEscalationEngine.sync_inventory_alerts(db, sku=payload.sku, warehouse_id=payload.warehouse_id)
+        await NetworkBalancingEngine.identify_network_transfers(db)
+        await ReplenishmentEngine.sync_recommendations(db)
 
         await db.commit()
 
@@ -500,6 +532,10 @@ async def record_sale(payload: SaleCreate, db: AsyncSession = Depends(get_db)) -
             "new_stock": inv.current_stock,
             "order_number": order_num,
             "customer": payload.customer_name
+        })
+        await ws_manager.broadcast({
+            "event": "REPLENISHMENT_UPDATED",
+            "timestamp": now_utc.isoformat()
         })
 
         return {
@@ -528,7 +564,7 @@ async def get_batches(
     db: AsyncSession = Depends(get_db)
 ) -> List[Dict[str, Any]]:
     """Returns batch-level expiry details with FEFO categorization."""
-    today = date(2026, 8, 24)
+    today = get_today_ist()
     query = select(Batch, Product).join(Product, Batch.sku == Product.sku).where(Batch.quantity > 0)
 
     if sku:

@@ -49,7 +49,7 @@ export default function TransactionModal({
   currentStock = 0
 }) {
   const isModalOpen = open !== undefined ? open : isOpen;
-  const initialSkuVal = initialSku || defaultProduct?.sku || 'P-1042';
+  const initialSkuVal = initialSku || defaultProduct?.sku || 'P-1065';
   const initialWhVal = resolveValidWarehouseId(initialWarehouse, defaultProduct, [], 'MUM-01');
   const initStockVal = currentStock || Number(defaultProduct?.currentStock || defaultProduct?.current_stock || 0);
 
@@ -73,7 +73,11 @@ export default function TransactionModal({
   const [supplierName, setSupplierName] = useState('HealthGen Pharma');
   const [poNumber, setPoNumber] = useState('PO-8845');
   const [batchId, setBatchId] = useState('');
-  const [expiryDate, setExpiryDate] = useState('2028-08-24');
+  const [expiryDate, setExpiryDate] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 2);
+    return d.toISOString().split('T')[0];
+  });
   const [unitCost, setUnitCost] = useState(defaultProduct?.unitCost || 25.0);
 
   // Adjustment
@@ -184,7 +188,9 @@ export default function TransactionModal({
         payload.reference_id = `AUDIT-${Date.now().toString().slice(-6)}`;
         payload.reason = `Physical Audit: ${adjustmentReason} (Variance: ${adjustmentDelta >= 0 ? `+${adjustmentDelta}` : adjustmentDelta} units)`;
       } else if (type === 'TRANSFER_OUT') {
+        payload.transaction_type = 'TRANSFER';
         payload.quantity = Number(quantity);
+        payload.warehouse_id = cleanWh;
         payload.destination_warehouse_id = destinationWarehouse;
         payload.reference_id = `TRF-${sku.toUpperCase()}-${cleanWh}-${destinationWarehouse}`;
         payload.reason = `Inter-DC Transfer from ${cleanWh} to ${destinationWarehouse}: ${transferReason} (ETA: ${transitDays}d)`;
@@ -252,7 +258,7 @@ export default function TransactionModal({
             <input
               value={sku}
               onChange={(e) => setSku(e.target.value)}
-              placeholder="e.g. P-1042"
+              placeholder="e.g. P-1065"
               className="w-full text-[12.5px] font-mono font-bold border border-ink-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-forest-600 uppercase bg-white"
               required
             />

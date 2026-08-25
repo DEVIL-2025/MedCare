@@ -1,4 +1,4 @@
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from typing import Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
@@ -8,6 +8,7 @@ from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.batch import Batch
 from backend.app.models.scenario import Scenario, ScenarioResult
+from backend.app.utils.timezone import get_today_ist
 
 
 class ScenarioSimulationEngine:
@@ -41,7 +42,7 @@ class ScenarioSimulationEngine:
         """
         Executes deterministic multi-node simulation under parametric stress against live DB baseline.
         """
-        today = date(2026, 8, 24)
+        today = get_today_ist()
         prods_res = await session.execute(select(Product).where(Product.is_active != False))
         products = {p.sku: p for p in prods_res.scalars().all()}
 
@@ -258,6 +259,7 @@ class ScenarioSimulationEngine:
         }
 
         # Persist Scenario in Database
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         scenario = Scenario(
             name=name,
             description=f"Demand: {demand_change_pct:+}%, Lead Time: {lead_time_change_days:+}d, Scope: {warehouse_filter}",
@@ -265,7 +267,7 @@ class ScenarioSimulationEngine:
             lead_time_change_days=lead_time_change_days,
             starting_inventory_change_pct=starting_inventory_change_pct,
             capacity_constraint_pct=capacity_constraint_pct,
-            created_at=datetime.utcnow()
+            created_at=now_utc
         )
         session.add(scenario)
         await session.flush()
@@ -278,7 +280,7 @@ class ScenarioSimulationEngine:
             avg_service_level_pct=sim_service_level,
             total_replenishment_need_inr=sim_replenish_val,
             total_replenishment_formatted=fmt(sim_replenish_val),
-            calculated_at=datetime.utcnow()
+            calculated_at=now_utc
         )
         session.add(result)
         await session.commit()

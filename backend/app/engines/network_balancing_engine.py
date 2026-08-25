@@ -1,5 +1,5 @@
 from datetime import date, timedelta
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
@@ -10,7 +10,7 @@ from backend.app.models.batch import Batch
 from backend.app.models.transfer import InventoryTransfer
 from backend.app.ml.predict import PredictionService
 from backend.app.config import settings
-
+from backend.app.utils.timezone import get_today_ist, get_now_ist
 
 class NetworkBalancingEngine:
     """
@@ -20,12 +20,15 @@ class NetworkBalancingEngine:
     """
 
     @staticmethod
-    async def identify_network_transfers(session: AsyncSession) -> List[InventoryTransfer]:
+    async def identify_network_transfers(
+        session: AsyncSession,
+        precomputed_forecasts: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> List[InventoryTransfer]:
         """
         Scans all SKUs across the DC network to discover and record optimal FEFO transfer candidates.
         Bulk pre-fetches all inventories, batches, and ML forecasts to eliminate N+1 queries.
         """
-        today = date(2026, 8, 24)
+        today = get_today_ist()
 
         # 1. Bulk pre-fetch all records
         prods_res = await session.execute(select(Product).where(Product.is_active != False))
@@ -40,8 +43,11 @@ class NetworkBalancingEngine:
             inventories_by_sku.setdefault(inv.sku, []).append(inv)
 
         batches_res = await session.execute(
-            select(Batch).where(
+            select(Batch)
+            .join(Warehouse, Batch.warehouse_id == Warehouse.id)
+            .where(
                 and_(
+                    Warehouse.is_active != False,
                     Batch.quantity > 0,
                     Batch.expiry_date > today
                 )
@@ -56,9 +62,10 @@ class NetworkBalancingEngine:
         trfs_res = await session.execute(select(InventoryTransfer))
         existing_trfs_map = {t.id: t for t in trfs_res.scalars().all()}
 
-        all_forecasts = await PredictionService.predict_all_demands(session, 30)
+        all_forecasts = precomputed_forecasts if precomputed_forecasts is not None else await PredictionService.predict_all_demands(session, 30)
 
         transfers = []
+        active_trf_ids = set()
 
         for prod in products:
             sku = prod.sku
@@ -84,20 +91,22 @@ class NetworkBalancingEngine:
                         "doc": doc,
                         "deficit": max(prod.moq, int(inv.reorder_point - inv.current_stock))
                     })
-                elif doc >= 20.0 or inv.current_stock >= inv.reorder_point * 1.2:
+                elif doc >= 20.0 or inv.current_stock >= inv.reorder_point * 1.1:
                     batches = batches_by_sku_wh.get(f"{sku}_{inv.warehouse_id}", [])
                     near_expiry_qty = sum(
                         b.quantity for b in batches if (b.expiry_date - today).days <= settings.EXPIRY_AT_RISK_DAYS
                     )
+                    surplus = max(0, int(inv.available_stock - inv.safety_stock))
 
-                    excess_nodes.append({
-                        "warehouse_id": inv.warehouse_id,
-                        "current_stock": inv.current_stock,
-                        "available_stock": inv.available_stock,
-                        "surplus": max(0, int(inv.available_stock - inv.safety_stock)),
-                        "near_expiry_qty": near_expiry_qty,
-                        "batches": batches
-                    })
+                    if surplus >= min(100, prod.moq):
+                        excess_nodes.append({
+                            "warehouse_id": inv.warehouse_id,
+                            "current_stock": inv.current_stock,
+                            "available_stock": inv.available_stock,
+                            "surplus": surplus,
+                            "near_expiry_qty": near_expiry_qty,
+                            "batches": batches
+                        })
 
             # Prioritize most urgent shortage (lowest DOC) and highest near-expiry surplus source
             shortage_nodes.sort(key=lambda x: x["doc"])
@@ -110,14 +119,15 @@ class NetworkBalancingEngine:
                         continue
 
                     available_transfer = min(e_node["surplus"], s_node["deficit"])
-                    if available_transfer >= 200:
+                    min_req = min(100, prod.moq)
+                    if available_transfer >= min_req:
                         # Find best batch from source (FEFO: earliest valid expiry)
                         chosen_batch = e_node["batches"][0] if e_node["batches"] else None
                         batch_id = chosen_batch.id if chosen_batch else None
                         
                         transfer_qty = min(available_transfer, 5000)
-                        # Round to nearest 100
-                        transfer_qty = max(100, int((transfer_qty + 99) // 100 * 100))
+                        # Round to nearest 50 or moq
+                        transfer_qty = max(prod.moq, int((transfer_qty + 49) // 50 * 50))
                         savings = round(transfer_qty * prod.unit_cost * 0.85, 2)  # Avoided procurement + writeoff
 
                         days_to_exp = (chosen_batch.expiry_date - today).days if chosen_batch else 60
@@ -138,6 +148,7 @@ class NetworkBalancingEngine:
                                 existing_trf.estimated_savings_inr = savings
                                 existing_trf.reason = reason
                                 transfers.append(existing_trf)
+                                active_trf_ids.add(trf_id)
                         else:
                             trf = InventoryTransfer(
                                 id=trf_id,
@@ -154,9 +165,15 @@ class NetworkBalancingEngine:
                             )
                             transfers.append(trf)
                             session.add(trf)
+                            active_trf_ids.add(trf_id)
 
                         # Deduct from excess node surplus so it's not double counted
                         e_node["surplus"] -= transfer_qty
+
+        # Clean up any obsolete RECOMMENDED transfers whose conditions no longer exist in DB
+        for trf_id, existing_trf in existing_trfs_map.items():
+            if existing_trf.status == "RECOMMENDED" and trf_id not in active_trf_ids:
+                await session.delete(existing_trf)
 
         await session.flush()
         return transfers

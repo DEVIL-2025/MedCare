@@ -7,6 +7,9 @@ from backend.app.database import get_db
 from backend.app.engines.demand_sensing_engine import DemandSensingEngine
 from backend.app.ml.predict import PredictionService
 from backend.app.ml.model_registry import ModelRegistry
+from backend.app.dependencies.auth import require_permission
+from backend.app.models.auth import User
+from backend.app.utils.timezone import get_now_ist, format_ist_datetime, get_today_ist
 
 router = APIRouter(prefix="/api/forecasts", tags=["Forecasts"])
 
@@ -28,9 +31,12 @@ async def get_forecast(
 
 
 @router.post("/train")
-async def train_model(db: AsyncSession = Depends(get_db)):
+async def train_model(
+    current_user: User = Depends(require_permission("forecast.train")),
+    db: AsyncSession = Depends(get_db)
+):
     """
-    Triggers explicit model retraining on the current PostgreSQL/SQLite database records.
+    Triggers explicit model retraining on the current PostgreSQL/SQLite database records (Admin Only).
     """
     metadata = await ModelRegistry.retrain_model(db)
     return {
@@ -79,7 +85,8 @@ async def get_model_transparency(db: AsyncSession = Depends(get_db)):
     return {
         "model_name": info.get("model_type", "Random Forest Regressor"),
         "version": info.get("version", "1.2.0-prod"),
-        "last_trained_at": info.get("trained_at", datetime.utcnow().isoformat()),
+        "last_trained_at": info.get("trained_at", get_now_ist().isoformat()),
+        "last_trained_formatted": format_ist_datetime(info.get("trained_at")),
         "dataset_lineage": lineage_obj,
         "lineage": lineage_obj,
         "accuracy_metrics": accuracy_obj,

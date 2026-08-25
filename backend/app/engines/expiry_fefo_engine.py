@@ -6,6 +6,7 @@ from sqlalchemy import select, and_
 from backend.app.models.batch import Batch
 from backend.app.models.product import Product
 from backend.app.config import settings
+from backend.app.utils.timezone import get_today_ist
 
 
 class ExpiryFEFOEngine:
@@ -18,7 +19,7 @@ class ExpiryFEFOEngine:
         expiry_date: date, today: Optional[date] = None
     ) -> Tuple[str, int]:
         """Categorizes batch into Expiry Risk Buckets: CRITICAL, AT_RISK, WATCH, NORMAL, EXPIRED."""
-        today = today or date(2026, 8, 24)
+        today = today or get_today_ist()
         days_to_expiry = (expiry_date - today).days
 
         if days_to_expiry <= 0:
@@ -42,7 +43,7 @@ class ExpiryFEFOEngine:
         """
         Selects batches in strict FEFO order, skipping expired or quarantined batches.
         """
-        today = date(2026, 8, 24)
+        today = get_today_ist()
         batches_res = await session.execute(
             select(Batch).where(
                 and_(
@@ -81,7 +82,7 @@ class ExpiryFEFOEngine:
         """
         Calculates network-wide inventory aging buckets and total financial value at risk.
         """
-        today = date(2026, 8, 24)
+        today = get_today_ist()
         batches_res = await session.execute(
             select(Batch, Product).join(Product, Batch.sku == Product.sku).where(Batch.quantity > 0)
         )

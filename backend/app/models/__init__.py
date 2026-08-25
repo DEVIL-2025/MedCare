@@ -15,6 +15,7 @@ from backend.app.models.signal import DemandSignal
 from backend.app.models.escalation import AlertEscalation
 from backend.app.models.sales import SalesOrder
 from backend.app.models.settings import SystemSetting
+from backend.app.models.auth import User, Role, Permission, RolePermission, AuditLog
 
 __all__ = [
     "Product",
@@ -39,5 +40,10 @@ __all__ = [
     "NotificationLog",
     "Scenario",
     "ScenarioResult",
-    "SystemSetting"
+    "SystemSetting",
+    "User",
+    "Role",
+    "Permission",
+    "RolePermission",
+    "AuditLog"
 ]

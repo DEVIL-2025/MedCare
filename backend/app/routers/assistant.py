@@ -94,7 +94,11 @@ async def assistant_chat(
     if any(w in query_text for w in ["stock", "inventory", "units", "available", "quantity", "how many", "count"]):
         if detected_sku:
             prod = products_by_sku[detected_sku]
-            inv_query = select(Inventory).where(Inventory.sku == detected_sku)
+            inv_query = (
+                select(Inventory)
+                .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
+                .where(Warehouse.is_active != False, Inventory.sku == detected_sku)
+            )
             if detected_wh:
                 inv_query = inv_query.where(Inventory.warehouse_id == detected_wh)
             inv_res = await db.execute(inv_query)

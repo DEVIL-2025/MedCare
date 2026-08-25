@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.notification import NotificationLog
@@ -26,6 +26,8 @@ class NotificationService:
         if ch not in ["EMAIL", "SMS", "WHATSAPP", "IN_APP"]:
             raise ValueError(f"Invalid notification channel: {channel}")
 
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
         # Format simulated message payload per channel
         if ch == "EMAIL":
             formatted_body = (
@@ -33,7 +35,7 @@ class NotificationService:
                 f"Dear Supply Chain Team,\n\n"
                 f"{message}\n\n"
                 f"Please review in MedCare Pharma SCM Control Tower.\n"
-                f"Generated at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                f"Generated at: {now_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}"
             )
         elif ch == "WHATSAPP":
             formatted_body = (
@@ -55,7 +57,7 @@ class NotificationService:
             subject=subject,
             message_body=formatted_body,
             status="DELIVERED" if ch in ["EMAIL", "WHATSAPP", "SMS"] else "SENT",
-            timestamp=datetime.utcnow()
+            timestamp=now_utc
         )
         session.add(log)
         await session.flush()

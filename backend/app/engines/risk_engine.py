@@ -1,4 +1,4 @@
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from typing import Dict, Any, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
@@ -10,6 +10,7 @@ from backend.app.models.product import Product
 from backend.app.models.risk import InventoryRisk
 from backend.app.engines.demand_sensing_engine import DemandSensingEngine
 from backend.app.config import settings
+from backend.app.utils.timezone import get_today_ist
 
 
 class RiskEngine:
@@ -27,7 +28,7 @@ class RiskEngine:
         Calculates Days of Cover, Stockout Risk Score, Estimated Stockout Date, and Expiry Risk.
         Returns None when no inventory record exists for the SKU and warehouse.
         """
-        today = date(2026, 8, 24)
+        today = get_today_ist()
 
         # 1. Fetch Inventory & Warehouse Metadata
         inv_res = await session.execute(
@@ -137,7 +138,7 @@ class RiskEngine:
             expiry_risk_score=expiry_score,
             expiry_risk_level=expiry_level,
             risk_summary=summary,
-            calculated_at=datetime.utcnow()
+            calculated_at=datetime.now(timezone.utc).replace(tzinfo=None)
         )
         session.add(risk_rec)
         await session.flush()

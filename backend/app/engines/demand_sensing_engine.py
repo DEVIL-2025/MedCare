@@ -6,6 +6,7 @@ from backend.app.ml.predict import PredictionService
 from backend.app.ml.model_registry import ModelRegistry
 from backend.app.models.demand import DemandHistory, SeasonalEvent
 from backend.app.models.forecast import DemandSurgeEvent
+from backend.app.utils.timezone import get_today_ist
 
 
 class DemandSensingEngine:
@@ -31,23 +32,23 @@ class DemandSensingEngine:
         """
         Scans all SKUs and DCs to detect and record demand surges (>25% uplift) using ML predictions.
         """
-        today = date(2026, 8, 24)
+        today = get_today_ist()
         skus_res = await session.execute(select(DemandHistory.sku, DemandHistory.warehouse_id).distinct())
         sku_dc_pairs = skus_res.all()
 
+        all_forecasts = await PredictionService.predict_all_demands(session, 30)
         surge_events = []
         for sku, wh_id in sku_dc_pairs:
-            f_data = await PredictionService.predict_demand(session, sku, wh_id, 30)
-            if f_data["surge_detected"]:
+            f_data = all_forecasts.get(f"{sku}_{wh_id}") or all_forecasts.get(f"{sku}_{wh_id}_30")
+            if f_data and f_data.get("surge_detected"):
                 surge = DemandSurgeEvent(
-                    id=f"SURGE-{sku}-{wh_id}-{int(today.strftime('%Y%m%d'))}",
                     sku=sku,
                     warehouse_id=wh_id,
                     surge_pct=f_data["surge_pct"],
-                    baseline_daily_demand=f_data["baseline_daily"],
-                    sensed_daily_demand=f_data["sensed_daily"],
+                    normal_demand=f_data["baseline_daily"],
+                    recent_sensed_demand=f_data["sensed_daily"],
                     severity="CRITICAL" if f_data["surge_pct"] >= 50 else "HIGH",
-                    primary_driver="Seasonal Flu Uplift (+60%)"
+                    explanation=f"Seasonal demand uplift (+{f_data['surge_pct']}%) sensed from local telemetry."
                 )
                 surge_events.append(surge)
                 session.add(surge)

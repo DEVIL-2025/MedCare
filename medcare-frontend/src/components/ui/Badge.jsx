@@ -5,12 +5,13 @@ const tones = {
   info: 'bg-slate2-100 text-slate2-700',
   good: 'bg-sage-100 text-sage-700',
   neutral: 'bg-ink-100 text-ink-700',
-}
+};
 
 export default function Badge({ tone = 'neutral', children }) {
+  const toneClass = tones[tone] || tones.neutral || 'bg-ink-100 text-ink-700';
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${tones[tone]}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${toneClass}`}>
       {children}
     </span>
-  )
+  );
 }

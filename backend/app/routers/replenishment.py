@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, or_, func
 from typing import List, Dict, Any, Optional
 from datetime import date, datetime, timedelta, timezone
 
@@ -13,6 +13,8 @@ from backend.app.models.warehouse import Warehouse
 from backend.app.models.batch import Batch
 from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
+from backend.app.ml.predict import PredictionService
+from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime, format_ist_date
 from backend.app.routers.ws import ws_manager
 
 router = APIRouter(prefix="/api/replenishment", tags=["Replenishment"])
@@ -24,12 +26,12 @@ async def get_fefo_batches(
     warehouse_id: Optional[str] = Query(None, description="Warehouse ID filter"),
     required_qty: Optional[int] = Query(None, description="Required replenishment quantity"),
     db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+):
     """
     Returns live batches in strict First-Expiry-First-Out (FEFO) priority from PostgreSQL.
     Excludes expired, quarantined, zero-quantity batches and inactive warehouses.
     """
-    today = date(2026, 8, 24)
+    today = get_today_ist()
     query = (
         select(Batch, Product)
         .join(Product, Batch.sku == Product.sku)
@@ -84,19 +86,18 @@ async def get_replenishment_overview(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Dynamically returns recommendations, transfer opportunities, supplier breakdowns,
-    category splits, and purchase orders from the database.
+    Dynamically returns active recommendations, transfer opportunities, supplier breakdowns,
+    category splits, purchase orders, active demands, and completed demands from PostgreSQL.
     """
-    today = date(2026, 8, 24)
+    today = get_today_ist()
 
-    # 0. Discover active inter-DC FEFO transfer opportunities
-    await NetworkBalancingEngine.identify_network_transfers(db)
-
-    # 1. Dynamically synchronize recommendations with transfer-first policy
-    await ReplenishmentEngine.sync_recommendations(db, warehouse_id=warehouse)
+    # 0. Discover active inter-DC FEFO transfer opportunities & sync recommendations
+    all_forecasts = await PredictionService.predict_all_demands(db, 30)
+    await NetworkBalancingEngine.identify_network_transfers(db, precomputed_forecasts=all_forecasts)
+    await ReplenishmentEngine.sync_recommendations(db, warehouse_id=warehouse, precomputed_forecasts=all_forecasts)
     await db.commit()
 
-    # 1. Fetch Recommendations from DB (Active warehouses & PENDING status only for main recommendation list)
+    # 1. Fetch Active Recommendations from DB (Active warehouses & PENDING/ACKNOWLEDGED/IN_PROGRESS status)
     rec_query = (
         select(ReplenishmentRecommendation, Product)
         .join(Product, ReplenishmentRecommendation.sku == Product.sku)
@@ -104,7 +105,7 @@ async def get_replenishment_overview(
         .where(
             Product.is_active != False,
             Warehouse.is_active != False,
-            ReplenishmentRecommendation.status == "PENDING"
+            ReplenishmentRecommendation.status.in_(["PENDING", "Pending", "ACKNOWLEDGED", "Acknowledged", "IN_PROGRESS", "In Progress"])
         )
     )
     if warehouse and warehouse != "All":
@@ -127,6 +128,8 @@ async def get_replenishment_overview(
         supplier_spend_map[supp] = supplier_spend_map.get(supp, 0.0) + r.estimated_cost_inr
         supplier_lead_map[supp] = 5
 
+        next_rev_str = format_ist_date(r.next_review_date) if r.next_review_date else format_ist_date(today + timedelta(days=7))
+
         recommendations_list.append({
             "id": r.id,
             "priority": r.priority,
@@ -134,12 +137,13 @@ async def get_replenishment_overview(
             "name": p.name,
             "category": p.category,
             "warehouse": r.warehouse_id,
+            "warehouse_id": r.warehouse_id,
             "supplier": supp,
             "currentStock": r.current_stock,
             "forecastDemand": int(r.forecast_demand_30d) if r.forecast_demand_30d else int(r.recommended_quantity * 1.2),
             "recommendedQty": r.recommended_quantity,
             "recommendedFrequency": r.recommended_frequency,
-            "nextReviewDate": r.next_review_date.strftime("%d %b %Y") if r.next_review_date else "28 Aug 2026",
+            "nextReviewDate": next_rev_str,
             "decisionType": r.decision_type,
             "preferredSource": r.preferred_source,
             "estCost": f"₹{cost_lakh} L" if cost_lakh > 0 else "₹0",
@@ -167,7 +171,7 @@ async def get_replenishment_overview(
             (InventoryTransfer.source_warehouse_id == warehouse) | 
             (InventoryTransfer.destination_warehouse_id == warehouse)
         )
-    trf_res = await db.execute(trf_query)
+    trf_res = await db.execute(trf_query.order_by(InventoryTransfer.created_at.desc()))
     trf_records = trf_res.all()
 
     transfers_list = [
@@ -209,7 +213,7 @@ async def get_replenishment_overview(
             "pct": max(5, pct)
         })
 
-    # 5. Purchase Orders & Requests from DB
+    # 5. Purchase Orders from DB
     po_query = select(PurchaseOrder).order_by(PurchaseOrder.order_date.desc())
     if warehouse and warehouse != "All":
         po_query = po_query.where(PurchaseOrder.warehouse_id == warehouse)
@@ -224,12 +228,13 @@ async def get_replenishment_overview(
             "warehouse": po.warehouse_id,
             "quantity": po.quantity,
             "value": f"₹{round(po.total_cost_inr / 100000.0, 1)} L",
-            "date": po.order_date.strftime("%d %b %Y"),
+            "date": format_ist_date(po.order_date),
             "status": po.status.capitalize()
         }
         for po in all_pos
     ]
 
+    # 6. Active Demands vs Completed Demands from PostgreSQL
     all_recs_query = (
         select(ReplenishmentRecommendation, Product)
         .join(Product, ReplenishmentRecommendation.sku == Product.sku)
@@ -241,19 +246,74 @@ async def get_replenishment_overview(
     all_recs_res = await db.execute(all_recs_query.order_by(ReplenishmentRecommendation.created_at.desc()))
     all_rec_records = all_recs_res.all()
 
-    replenishment_requests = [
-        {
-            "id": f"RR-{r.sku}-{r.warehouse_id}",
+    active_demands = []
+    completed_demands = []
+
+    for r, p in all_rec_records:
+        demand_status_upper = r.status.upper()
+        req_date_str = format_ist_date(r.created_at) if r.created_at else format_ist_date(today)
+        
+        # Check if there is an associated PO or Transfer
+        matching_po = next((po for po in all_pos if po.sku == r.sku and po.warehouse_id == r.warehouse_id), None)
+        matching_trf = next((t for t, _ in trf_records if t.sku == r.sku and t.destination_warehouse_id == r.warehouse_id), None)
+        ref_id = matching_po.id if matching_po else (matching_trf.id if matching_trf else f"REC-{r.sku}-{r.warehouse_id}")
+
+        completed_date_val = format_ist_datetime(r.updated_at) if hasattr(r, "updated_at") and r.updated_at else req_date_str
+
+        item_dict = {
+            "id": r.id,
+            "demandId": f"DMD-{r.sku}-{r.warehouse_id}",
             "sku": r.sku,
             "name": p.name if p else r.sku,
+            "category": p.category if p else "General",
             "warehouse": r.warehouse_id,
-            "qty": r.recommended_quantity,
+            "sourceWarehouse": matching_trf.source_warehouse_id if matching_trf else (r.preferred_source or "HealthGen Pharma"),
+            "destinationWarehouse": r.warehouse_id,
+            "quantity": r.recommended_quantity,
             "requestedBy": r.requested_by or "Lead SCM Planner",
-            "date": r.created_at.strftime("%d %b %Y") if r.created_at else "24 Aug 2026",
-            "status": r.status.capitalize()
+            "requestedDate": req_date_str,
+            "date": req_date_str,
+            "status": r.status.capitalize(),
+            "rawStatus": r.status,
+            "ackStatus": "Acknowledged" if demand_status_upper in ["ACKNOWLEDGED", "APPROVED", "COMPLETED"] else "Pending Acknowledgment",
+            "transferStatus": "Executed" if demand_status_upper in ["COMPLETED", "APPROVED"] else "Awaiting Execution",
+            "referenceId": ref_id,
+            "completedDate": completed_date_val if demand_status_upper in ["COMPLETED", "APPROVED"] else None,
+            "reason": r.reason_why or r.reason_what or "Safety buffer replenishment"
         }
-        for r, p in all_rec_records
-    ]
+
+        if demand_status_upper in ["COMPLETED", "APPROVED", "RECEIVED", "FULFILLED", "EXECUTED"]:
+            completed_demands.append(item_dict)
+        else:
+            active_demands.append(item_dict)
+
+    # Also add completed transfers to completed_demands if not already present
+    for t, p in trf_records:
+        if t.status in ["COMPLETED", "Completed", "EXECUTED", "Executed"]:
+            if not any(cd["referenceId"] == t.id for cd in completed_demands):
+                t_date_str = format_ist_date(t.created_at) if t.created_at else format_ist_date(today)
+                t_comp_str = format_ist_datetime(t.received_at) if t.received_at else (format_ist_datetime(t.dispatched_at) if t.dispatched_at else t_date_str)
+                completed_demands.append({
+                    "id": t.id,
+                    "demandId": f"DMD-TRF-{t.sku}-{t.source_warehouse_id}-{t.destination_warehouse_id}",
+                    "sku": t.sku,
+                    "name": p.name,
+                    "category": p.category,
+                    "warehouse": t.destination_warehouse_id,
+                    "sourceWarehouse": t.source_warehouse_id,
+                    "destinationWarehouse": t.destination_warehouse_id,
+                    "quantity": t.quantity,
+                    "requestedBy": "Inter-DC Balancer",
+                    "requestedDate": t_date_str,
+                    "date": t_date_str,
+                    "status": "Completed",
+                    "rawStatus": "COMPLETED",
+                    "ackStatus": "Acknowledged",
+                    "transferStatus": "Executed",
+                    "referenceId": t.id,
+                    "completedDate": t_comp_str,
+                    "reason": t.reason or "Inter-DC transfer balancing"
+                })
 
     approved_orders = [
         {
@@ -275,9 +335,145 @@ async def get_replenishment_overview(
         "transfer_opportunities": transfers_list,
         "top_suppliers": top_suppliers,
         "replenishment_by_category": replenishment_by_category,
-        "replenishment_requests": replenishment_requests,
+        "replenishment_requests": active_demands,
+        "active_demands": active_demands,
+        "completed_demands": completed_demands,
         "approved_orders": approved_orders,
         "purchase_orders": purchase_orders
+    }
+
+
+@router.post("/{rec_id}/complete")
+@router.post("/recommendations/{rec_id}/complete")
+@router.post("/demands/{rec_id}/complete")
+async def complete_demand(rec_id: str, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Marks a replenishment demand/recommendation or transfer as COMPLETED in PostgreSQL:
+    - Sets recommendation status to 'COMPLETED'
+    - Updates matching transfers to 'COMPLETED'
+    - Updates matching Purchase Orders to 'COMPLETED'
+    - Synchronizes recommendations
+    - Broadcasts live WebSocket event
+    """
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # 1. Check recommendation
+    rec_res = await db.execute(
+        select(ReplenishmentRecommendation).where(
+            or_(
+                ReplenishmentRecommendation.id == rec_id,
+                ReplenishmentRecommendation.id == f"REC-{rec_id}",
+                ReplenishmentRecommendation.sku == rec_id
+            )
+        )
+    )
+    rec = rec_res.scalars().first()
+    
+    # 2. Check transfer
+    trf_res = await db.execute(
+        select(InventoryTransfer).where(
+            or_(
+                InventoryTransfer.id == rec_id,
+                InventoryTransfer.id == f"TRF-{rec_id}"
+            )
+        )
+    )
+    trf = trf_res.scalars().first()
+
+    # 3. Check purchase order
+    po_res = await db.execute(
+        select(PurchaseOrder).where(
+            or_(
+                PurchaseOrder.id == rec_id,
+                PurchaseOrder.id == f"PO-{rec_id}"
+            )
+        )
+    )
+    po = po_res.scalars().first()
+
+    if not rec and not trf and not po:
+        # Fallback: search by prefix match or split
+        raise HTTPException(status_code=404, detail=f"Replenishment demand '{rec_id}' not found in database.")
+
+    sku_affected = "Items"
+    wh_affected = "All"
+
+    if rec:
+        rec.status = "COMPLETED"
+        sku_affected = rec.sku
+        wh_affected = rec.warehouse_id
+
+    if trf:
+        trf.status = "COMPLETED"
+        trf.received_at = now_utc
+        sku_affected = trf.sku
+        wh_affected = trf.destination_warehouse_id
+
+    if po:
+        po.status = "COMPLETED"
+        sku_affected = po.sku
+        wh_affected = po.warehouse_id
+
+    # Recalculate dynamic recommendations
+    await NetworkBalancingEngine.identify_network_transfers(db)
+    await ReplenishmentEngine.sync_recommendations(db)
+    await db.commit()
+
+    await ws_manager.broadcast({
+        "event": "REPLENISHMENT_UPDATED",
+        "action": "COMPLETE",
+        "id": rec_id,
+        "sku": sku_affected,
+        "warehouse_id": wh_affected,
+        "timestamp": now_utc.isoformat()
+    })
+
+    return {
+        "success": True,
+        "id": rec_id,
+        "status": "COMPLETED",
+        "message": f"Replenishment demand for {sku_affected} at {wh_affected} successfully marked as Completed in PostgreSQL."
+    }
+
+
+@router.post("/{rec_id}/acknowledge")
+@router.post("/recommendations/{rec_id}/acknowledge")
+@router.post("/demands/{rec_id}/acknowledge")
+async def acknowledge_demand(rec_id: str, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Marks a replenishment demand/recommendation as ACKNOWLEDGED in PostgreSQL.
+    """
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    rec_res = await db.execute(
+        select(ReplenishmentRecommendation).where(
+            or_(
+                ReplenishmentRecommendation.id == rec_id,
+                ReplenishmentRecommendation.id == f"REC-{rec_id}"
+            )
+        )
+    )
+    rec = rec_res.scalars().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Replenishment demand '{rec_id}' not found.")
+
+    rec.status = "ACKNOWLEDGED"
+    await db.commit()
+
+    await ws_manager.broadcast({
+        "event": "REPLENISHMENT_UPDATED",
+        "action": "ACKNOWLEDGE",
+        "id": rec.id,
+        "sku": rec.sku,
+        "warehouse_id": rec.warehouse_id,
+        "timestamp": now_utc.isoformat()
+    })
+
+    return {
+        "success": True,
+        "id": rec.id,
+        "status": "ACKNOWLEDGED",
+        "message": f"Demand for {rec.sku} in {rec.warehouse_id} marked as Acknowledged."
     }
 
 
@@ -325,7 +521,7 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
             order_date=today,
             eta_date=today + timedelta(days=5),
             status="APPROVED",
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None)
         )
         db.add(po)
 
@@ -339,7 +535,11 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
         inv = inv_res.scalars().first()
         if inv:
             inv.inbound_stock += rec.recommended_quantity
-            inv.last_recalculated_at = datetime.now(timezone.utc)
+            inv.last_recalculated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Recalculate recommendations & transfers
+    await NetworkBalancingEngine.identify_network_transfers(db)
+    await ReplenishmentEngine.sync_recommendations(db)
 
     await db.commit()
 

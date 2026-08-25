@@ -247,8 +247,8 @@ export default function Warehouses() {
                 <YAxis tick={{ fontSize: 11, fill: '#68716D' }} axisLine={false} tickLine={false} domain={[0, 100]} />
                 <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid #E2E5E1', fontSize: 12 }} />
                 <Legend wrapperStyle={{ fontSize: 12, color: '#68716D' }} />
-                {overviewList.slice(0, 3).map((w, idx) => {
-                  const strokeColors = ["#177A5B", "#D5A72C", "#3B82F6", "#8B5CF6"];
+                {overviewList.map((w, idx) => {
+                  const strokeColors = ["#177A5B", "#D5A72C", "#3B82F6", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316", "#6366F1", "#10B981"];
                   return (
                     <Line
                       key={w.id}

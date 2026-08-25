@@ -20,7 +20,7 @@ const signalBadgeStyles = {
 
 export default function DemandForecast() {
   const { selectedWarehouse, setSelectedWarehouse, refreshKey } = useControlTower();
-  const [sku, setSku] = useState('P-1042');
+  const [sku, setSku] = useState('P-1065');
   const [warehouse, setWarehouse] = useState(selectedWarehouse !== 'All' ? selectedWarehouse : 'PAT-01');
   const [horizon, setHorizon] = useState('30 Days');
   
@@ -51,8 +51,12 @@ export default function DemandForecast() {
           api.getProducts(),
           api.getWarehouses()
         ]);
-        setProducts(Array.isArray(prods) ? prods : []);
+        const prodList = Array.isArray(prods) ? prods : [];
+        setProducts(prodList);
         setWarehouses(Array.isArray(whs) ? whs : (whs?.overview || []));
+        if (prodList.length > 0 && (!sku || !prodList.some(p => p.sku === sku))) {
+          setSku(prodList[0].sku);
+        }
       } catch (err) {
         console.warn('Failed to load forecast selectors metadata:', err);
       }
@@ -359,8 +363,14 @@ export default function DemandForecast() {
           <div className="space-y-2.5 text-[11.5px] text-ink-700">
             <div className="p-2 rounded bg-cream-100 border border-ink-100 font-medium">
               <span className="font-bold text-ink-900 block mb-0.5">Automated Schedule:</span>
-              {modelTransparency?.retraining_policy?.cadence || 'Daily scheduled job at 02:00 UTC'}
+              Daily scheduled background calibration at 02:00 AM IST
             </div>
+            {modelTransparency?.last_trained_formatted && (
+              <div className="p-2 rounded bg-cream-100 border border-ink-100 text-[11px] text-ink-600">
+                <span className="font-bold text-ink-900 block mb-0.5">Last Trained Time (IST):</span>
+                {modelTransparency.last_trained_formatted}
+              </div>
+            )}
             <div className="space-y-1.5">
               <span className="font-bold text-ink-900 block">Active Retraining Triggers:</span>
               {modelTransparency?.retraining_policy?.triggers?.map((trig, i) => (

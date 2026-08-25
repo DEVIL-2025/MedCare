@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     # Transfer-First Network Policy
     TRANSFER_FIRST_ENABLED: bool = True
     
+    # JWT Authentication & Security Configuration
+    JWT_SECRET_KEY: str = "medcare_scm_control_tower_super_secure_jwt_secret_key_2026_npn"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    
+    # Initial Admin Seed Configuration
+    ADMIN_EMAIL: str = "admin@medcarepharma.com"
+    ADMIN_USER_ID: str = "admin"
+    ADMIN_FULL_NAME: str = "System Administrator"
+    ADMIN_INITIAL_PASSWORD: str = "Admin@12345"
+
     class Config:
         env_file = ".env"
         extra = "ignore"
