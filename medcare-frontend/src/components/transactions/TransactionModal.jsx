@@ -1,0 +1,621 @@
+import { useState, useEffect } from 'react';
+import { ShoppingCart, PackagePlus, ArrowRightLeft, SlidersHorizontal, AlertCircle, CheckCircle2, FlaskConical, Building, FileText, UserCheck, Calendar } from 'lucide-react';
+import Modal from '../ui/Modal';
+import { api } from '../../api/client';
+
+const TRANSACTION_TYPES = [
+  { id: 'SALE', label: 'Sale (Outbound)', icon: ShoppingCart, desc: 'Deducts stock for hospital/distributor sale via strict FEFO allocation' },
+  { id: 'RECEIPT', label: 'Stock Receipt (Inbound)', icon: PackagePlus, desc: 'Receive newly manufactured supplier batch into DC inventory' },
+  { id: 'ADJUSTMENT', label: 'Audit Adjustment', icon: SlidersHorizontal, desc: 'Record physical inventory count discrepancies or shrinkage' },
+  { id: 'TRANSFER_OUT', label: 'Inter-DC Transfer', icon: ArrowRightLeft, desc: 'Rebalance surplus inventory from one DC to another' },
+  { id: 'CONSUMPTION', label: 'Internal Consumption', icon: FlaskConical, desc: 'Clinical trials, QA destructive testing, or hospital dispensing' },
+];
+
+function resolveValidWarehouseId(whValue, defaultObj, availableList, fallback = 'MUM-01') {
+  const invalidStrings = ['all', 'all warehouses', 'network', 'network rollup', 'all_dcs', 'null', 'undefined', ''];
+  
+  // 1. Check direct passed value
+  if (whValue && !invalidStrings.includes(String(whValue).trim().toLowerCase())) {
+    return whValue;
+  }
+  // 2. Check defaultObj breakdown if rollup
+  if (defaultObj?.warehouseBreakdown && defaultObj.warehouseBreakdown.length > 0) {
+    const firstWb = defaultObj.warehouseBreakdown[0].warehouseId;
+    if (firstWb && !invalidStrings.includes(String(firstWb).trim().toLowerCase())) {
+      return firstWb;
+    }
+  }
+  // 3. Check defaultObj warehouse_id / warehouse
+  const objWh = defaultObj?.warehouse_id || defaultObj?.warehouse;
+  if (objWh && !invalidStrings.includes(String(objWh).trim().toLowerCase())) {
+    return objWh;
+  }
+  // 4. Use first available DC from loaded list
+  if (availableList && availableList.length > 0) {
+    return availableList[0].id;
+  }
+  return fallback;
+}
+
+export default function TransactionModal({
+  open,
+  isOpen,
+  onClose,
+  onTransactionSuccess,
+  onSuccess,
+  defaultProduct,
+  initialSku,
+  initialWarehouse,
+  currentStock = 0
+}) {
+  const isModalOpen = open !== undefined ? open : isOpen;
+  const initialSkuVal = initialSku || defaultProduct?.sku || 'P-1042';
+  const initialWhVal = resolveValidWarehouseId(initialWarehouse, defaultProduct, [], 'MUM-01');
+  const initStockVal = currentStock || Number(defaultProduct?.currentStock || defaultProduct?.current_stock || 0);
+
+  const [type, setType] = useState('SALE');
+  const [sku, setSku] = useState(initialSkuVal);
+  const [warehouse, setWarehouse] = useState(initialWhVal);
+  const [quantity, setQuantity] = useState(250);
+  const [warehouses, setWarehouses] = useState([]);
+  const [liveStock, setLiveStock] = useState(initStockVal);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+
+  // Type-specific field states
+  // Sale
+  const [customerName, setCustomerName] = useState('Apollo Hospitals Mumbai');
+  const [salesChannel, setSalesChannel] = useState('Hospital');
+  const [unitPrice, setUnitPrice] = useState(25.0);
+
+  // Receipt
+  const [supplierName, setSupplierName] = useState('HealthGen Pharma');
+  const [poNumber, setPoNumber] = useState('PO-8845');
+  const [batchId, setBatchId] = useState('');
+  const [expiryDate, setExpiryDate] = useState('2028-08-24');
+  const [unitCost, setUnitCost] = useState(defaultProduct?.unitCost || 25.0);
+
+  // Adjustment
+  const [actualPhysicalCount, setActualPhysicalCount] = useState(initStockVal);
+  const [adjustmentReason, setAdjustmentReason] = useState('Physical Cycle Count Discrepancy');
+  const [auditorName, setAuditorName] = useState('QA Audit Officer');
+
+  // Transfer
+  const [destinationWarehouse, setDestinationWarehouse] = useState('PAT-01');
+  const [transferReason, setTransferReason] = useState('Regional Surge Balancing & FEFO Optimization');
+  const [transitDays, setTransitDays] = useState(3);
+
+  // Consumption
+  const [department, setDepartment] = useState('Emergency Clinical Ward');
+  const [consumptionReason, setConsumptionReason] = useState('Routine Hospital Inpatient Dispensing');
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const whs = await api.getWarehouses();
+        const list = Array.isArray(whs) ? whs : (whs?.overview || []);
+        setWarehouses(list);
+        if (list.length > 0) {
+          setWarehouse((prev) => resolveValidWarehouseId(prev, defaultProduct, list));
+          const otherDcs = list.filter(w => w.id !== warehouse);
+          if (otherDcs.length > 0) {
+            setDestinationWarehouse(otherDcs[0].id);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load warehouses for modal:', err);
+      }
+    }
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    if (defaultProduct) {
+      if (defaultProduct.sku) setSku(defaultProduct.sku);
+      const validWh = resolveValidWarehouseId(defaultProduct.warehouse_id || defaultProduct.warehouse, defaultProduct, warehouses);
+      setWarehouse(validWh);
+      const st = Number(defaultProduct.currentStock || defaultProduct.current_stock || 0);
+      setLiveStock(st);
+      setActualPhysicalCount(st);
+    }
+  }, [defaultProduct, warehouses]);
+
+  // Adjustments calculate variance delta
+  const isAdjustment = type === 'ADJUSTMENT';
+  const adjustmentDelta = isAdjustment ? Number(actualPhysicalCount) - Number(liveStock) : 0;
+
+  const isDeduction = ['SALE', 'CONSUMPTION', 'TRANSFER_OUT'].includes(type) || (isAdjustment && adjustmentDelta < 0);
+  
+  let projectedStock = liveStock;
+  if (isAdjustment) {
+    projectedStock = Math.max(0, Number(actualPhysicalCount));
+  } else if (isDeduction) {
+    projectedStock = Math.max(0, liveStock - Number(quantity || 0));
+  } else {
+    projectedStock = liveStock + Number(quantity || 0);
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    // Strict Frontend Warehouse Validation
+    const cleanWh = String(warehouse || '').trim();
+    if (!cleanWh || ['all', 'all warehouses', 'network', 'network rollup', 'all_dcs'].includes(cleanWh.toLowerCase())) {
+      setError('Please select a specific, real distribution center warehouse (e.g. MUM-01, DEL-02, PAT-01).');
+      return;
+    }
+
+    if (type === 'TRANSFER_OUT') {
+      const cleanDest = String(destinationWarehouse || '').trim();
+      if (!cleanDest || ['all', 'all warehouses', 'network', 'network rollup'].includes(cleanDest.toLowerCase())) {
+        setError('Please select a valid destination warehouse.');
+        return;
+      }
+      if (cleanDest === cleanWh) {
+        setError('Destination warehouse cannot be the same as the source warehouse.');
+        return;
+      }
+    }
+
+    setLoading(true);
+
+    try {
+      let payload = {
+        transaction_type: type,
+        sku: sku.trim().toUpperCase(),
+        warehouse_id: cleanWh,
+        performed_by: auditorName || 'Supply Chain Planner'
+      };
+
+      if (type === 'SALE') {
+        payload.quantity = Number(quantity);
+        payload.reference_id = `SO-${Date.now().toString().slice(-6)}`;
+        payload.reason = `Sale to ${customerName} (${salesChannel}) @ ₹${unitPrice}/unit`;
+      } else if (type === 'RECEIPT') {
+        payload.quantity = Number(quantity);
+        payload.batch_id = batchId || `BAT-${sku.toUpperCase()}-${cleanWh}-${Date.now().toString().slice(-4)}`;
+        payload.reference_id = poNumber;
+        payload.reason = `Inbound Receipt from ${supplierName} (PO: ${poNumber}, Exp: ${expiryDate})`;
+      } else if (type === 'ADJUSTMENT') {
+        payload.quantity = adjustmentDelta;
+        payload.reference_id = `AUDIT-${Date.now().toString().slice(-6)}`;
+        payload.reason = `Physical Audit: ${adjustmentReason} (Variance: ${adjustmentDelta >= 0 ? `+${adjustmentDelta}` : adjustmentDelta} units)`;
+      } else if (type === 'TRANSFER_OUT') {
+        payload.quantity = Number(quantity);
+        payload.destination_warehouse_id = destinationWarehouse;
+        payload.reference_id = `TRF-${sku.toUpperCase()}-${cleanWh}-${destinationWarehouse}`;
+        payload.reason = `Inter-DC Transfer from ${cleanWh} to ${destinationWarehouse}: ${transferReason} (ETA: ${transitDays}d)`;
+      } else if (type === 'CONSUMPTION') {
+        payload.quantity = Number(quantity);
+        payload.reference_id = `CON-${Date.now().toString().slice(-6)}`;
+        payload.reason = `Internal Consumption by ${department}: ${consumptionReason}`;
+      }
+
+      const res = await api.createTransaction(payload);
+
+      setSuccess(res.message || 'Transaction executed successfully and recorded in PostgreSQL audit trail!');
+      if (onTransactionSuccess) onTransactionSuccess(res);
+      if (onSuccess) onSuccess(res);
+
+      setTimeout(() => {
+        setSuccess(null);
+        if (onClose) onClose();
+      }, 1400);
+    } catch (err) {
+      setError(err.message || 'Transaction execution failed.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal open={Boolean(isModalOpen)} onClose={onClose} title="Execute Inventory Transaction">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Transaction Type Tabs */}
+        <div>
+          <label className="text-[11px] font-semibold text-ink-600 block mb-1.5 uppercase tracking-wide">
+            Select Operation Type
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {TRANSACTION_TYPES.map((t) => {
+              const Icon = t.icon;
+              const isSelected = type === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setType(t.id)}
+                  className={`flex items-center gap-2 p-2 rounded-md border text-left transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'border-forest-600 bg-forest-100/60 text-forest-900 font-bold shadow-xs'
+                      : 'border-ink-100 hover:bg-cream-200 text-ink-700 font-medium'
+                  }`}
+                >
+                  <Icon size={14} className={isSelected ? 'text-forest-700' : 'text-ink-500'} />
+                  <span className="text-[11.5px] leading-tight">{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-ink-500 mt-1 italic">
+            {TRANSACTION_TYPES.find((t) => t.id === type)?.desc}
+          </p>
+        </div>
+
+        {/* Universal SKU & Warehouse Selectors */}
+        <div className="grid grid-cols-2 gap-3 p-3 bg-cream-100/60 rounded-md border border-ink-100">
+          <div>
+            <label className="text-[11px] font-semibold text-ink-700 block mb-1">Product SKU</label>
+            <input
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              placeholder="e.g. P-1042"
+              className="w-full text-[12.5px] font-mono font-bold border border-ink-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-forest-600 uppercase bg-white"
+              required
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-ink-700 block mb-1">
+              {type === 'TRANSFER_OUT' ? 'Source Warehouse (From)' : 'Target Warehouse (DC)'}
+            </label>
+            <select
+              value={warehouse}
+              onChange={(e) => setWarehouse(e.target.value)}
+              className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 text-ink-800 font-medium focus:outline-none focus:border-forest-600 bg-white"
+              required
+            >
+              {warehouses.length > 0 ? (
+                warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name} ({w.id})</option>
+                ))
+              ) : (
+                <>
+                  <option value="MUM-01">Mumbai Central DC (MUM-01)</option>
+                  <option value="DEL-02">Delhi NCR DC (DEL-02)</option>
+                  <option value="PAT-01">Patna Regional DC (PAT-01)</option>
+                </>
+              )}
+            </select>
+          </div>
+        </div>
+
+        {/* 1. SALE (OUTBOUND) SPECIFIC FIELDS */}
+        {type === 'SALE' && (
+          <div className="space-y-3 p-3 bg-forest-100/30 rounded-md border border-forest-600/20">
+            <span className="text-[11px] font-bold text-forest-800 uppercase block">Outbound Sales Order Details</span>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Customer / Hospital Name</label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="e.g. Apollo Hospitals Mumbai"
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Sales Channel</label>
+                <select
+                  value={salesChannel}
+                  onChange={(e) => setSalesChannel(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white text-ink-800 font-medium focus:outline-none focus:border-forest-600"
+                >
+                  <option value="Hospital">Hospital Network</option>
+                  <option value="Retail Pharmacy">Retail Pharmacy Chain</option>
+                  <option value="Distributor">Regional Wholesaler</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Quantity to Dispatch (Units)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="w-full text-[13px] font-bold border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600 text-forest-900"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Selling Price / Unit (₹)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={unitPrice}
+                  onChange={(e) => setUnitPrice(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                />
+              </div>
+            </div>
+            <div className="text-[11px] text-forest-700 bg-forest-100/60 p-2 rounded border border-forest-600/20">
+              ⚡ <strong>FEFO Guarantee:</strong> Units will be allocated automatically against the nearest-expiry batch in {warehouse}.
+            </div>
+          </div>
+        )}
+
+        {/* 2. RECEIPT (INBOUND) SPECIFIC FIELDS */}
+        {type === 'RECEIPT' && (
+          <div className="space-y-3 p-3 bg-amber-100/30 rounded-md border border-amber-600/20">
+            <span className="text-[11px] font-bold text-amber-900 uppercase block">Inbound Supplier Batch Details</span>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Supplier Name</label>
+                <input
+                  type="text"
+                  value={supplierName}
+                  onChange={(e) => setSupplierName(e.target.value)}
+                  placeholder="e.g. HealthGen Pharma"
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Purchase Order / GRN Ref</label>
+                <input
+                  type="text"
+                  value={poNumber}
+                  onChange={(e) => setPoNumber(e.target.value)}
+                  placeholder="e.g. PO-8845"
+                  className="w-full text-[12px] font-mono border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Quantity (Units)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="w-full text-[12.5px] font-bold border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Batch ID (Optional)</label>
+                <input
+                  type="text"
+                  value={batchId}
+                  onChange={(e) => setBatchId(e.target.value)}
+                  placeholder="Auto-generated"
+                  className="w-full text-[12px] font-mono border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Batch Expiry Date</label>
+                <input
+                  type="date"
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 3. AUDIT ADJUSTMENT SPECIFIC FIELDS */}
+        {type === 'ADJUSTMENT' && (
+          <div className="space-y-3 p-3 bg-gold-100/30 rounded-md border border-gold-600/20">
+            <span className="text-[11px] font-bold text-gold-900 uppercase block">Physical Inventory Audit Reconcile</span>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Current System Count</label>
+                <div className="text-[13px] font-bold px-3 py-1.5 bg-cream-200 rounded border border-ink-200 text-ink-800">
+                  {Number(liveStock).toLocaleString()} units
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Actual Physical Counted</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={actualPhysicalCount}
+                  onChange={(e) => setActualPhysicalCount(e.target.value)}
+                  className="w-full text-[13px] font-bold border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600 text-ink-900"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Variance Reason</label>
+                <select
+                  value={adjustmentReason}
+                  onChange={(e) => setAdjustmentReason(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white text-ink-800 font-medium focus:outline-none focus:border-forest-600"
+                >
+                  <option value="Physical Cycle Count Discrepancy">Physical Cycle Count Discrepancy</option>
+                  <option value="Damaged in Warehouse Storage">Damaged in Warehouse Storage</option>
+                  <option value="Liquid Spillage / Breakage">Liquid Spillage / Breakage</option>
+                  <option value="Quarantine Reclassification">Quarantine Reclassification</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Auditor / Officer Name</label>
+                <input
+                  type="text"
+                  value={auditorName}
+                  onChange={(e) => setAuditorName(e.target.value)}
+                  placeholder="e.g. Lead QA Auditor"
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 4. INTER-DC TRANSFER SPECIFIC FIELDS */}
+        {type === 'TRANSFER_OUT' && (
+          <div className="space-y-3 p-3 bg-purple-100/30 rounded-md border border-purple-600/20">
+            <span className="text-[11px] font-bold text-purple-900 uppercase block">Inter-DC Stock Rebalancing</span>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Destination Warehouse (To)</label>
+                <select
+                  value={destinationWarehouse}
+                  onChange={(e) => setDestinationWarehouse(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white text-ink-800 font-medium focus:outline-none focus:border-forest-600"
+                  required
+                >
+                  {warehouses
+                    .filter((w) => w.id !== warehouse)
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>{w.name} ({w.id})</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Transfer Quantity (Units)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={liveStock}
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="w-full text-[13px] font-bold border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Rebalancing Clinical Reason</label>
+                <input
+                  type="text"
+                  value={transferReason}
+                  onChange={(e) => setTransferReason(e.target.value)}
+                  placeholder="e.g. Prevent Tier-2 DC stockout"
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Estimated Transit Days</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={transitDays}
+                  onChange={(e) => setTransitDays(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. CONSUMPTION SPECIFIC FIELDS */}
+        {type === 'CONSUMPTION' && (
+          <div className="space-y-3 p-3 bg-cream-200/50 rounded-md border border-ink-100">
+            <span className="text-[11px] font-bold text-ink-800 uppercase block">Dispensing & Consumption Record</span>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Department / Clinical Unit</label>
+                <input
+                  type="text"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  placeholder="e.g. Emergency Ward"
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Quantity (Units)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={liveStock}
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="w-full text-[13px] font-bold border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] text-ink-600 block mb-1">Dispensing Reason / Note</label>
+              <input
+                type="text"
+                value={consumptionReason}
+                onChange={(e) => setConsumptionReason(e.target.value)}
+                placeholder="e.g. Hospital inpatient antibiotic course"
+                className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Live Balance Impact Preview */}
+        <div className="bg-cream-200/80 rounded-md p-3 border border-ink-100 text-[12px] space-y-1.5">
+          <div className="font-semibold text-ink-900">Live Inventory Balance Impact</div>
+          <div className="flex items-center justify-between text-ink-700">
+            <span>Current Stock in {warehouse}:</span>
+            <span className="font-semibold">{Number(liveStock).toLocaleString()} units</span>
+          </div>
+          <div className="flex items-center justify-between text-ink-700">
+            <span>Transaction Impact:</span>
+            <span className={isDeduction ? 'text-brick-600 font-bold' : 'text-forest-700 font-bold'}>
+              {isAdjustment
+                ? (adjustmentDelta >= 0 ? `+${adjustmentDelta.toLocaleString()}` : `${adjustmentDelta.toLocaleString()}`)
+                : (isDeduction ? `-${Number(quantity || 0).toLocaleString()}` : `+${Number(quantity || 0).toLocaleString()}`)}{' '}
+              units
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-ink-900 border-t border-ink-200 pt-1.5 font-bold">
+            <span>Projected New Balance:</span>
+            <span className="text-forest-800 font-mono text-[13px]">
+              {Number(projectedStock).toLocaleString()} units
+            </span>
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2 p-2.5 bg-brick-100 border border-brick-600/30 rounded text-brick-700 text-[12px]">
+            <AlertCircle size={14} className="shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {success && (
+          <div className="flex items-center gap-2 p-2.5 bg-forest-100 border border-forest-600/30 rounded text-forest-800 text-[12px] font-semibold animate-fadeIn">
+            <CheckCircle2 size={14} className="shrink-0" />
+            <span>{success}</span>
+          </div>
+        )}
+
+        {/* Modal Actions */}
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-ink-100">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-1.5 border border-ink-200 rounded text-[12px] text-ink-700 hover:bg-cream-200 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-4 py-1.5 bg-forest-700 hover:bg-forest-600 text-white rounded text-[12px] font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {loading ? 'Submitting to PostgreSQL...' : 'Commit Transaction to DB'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
