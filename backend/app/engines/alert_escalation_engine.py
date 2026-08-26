@@ -147,7 +147,7 @@ class AlertEscalationEngine:
 
             # Condition 1: Total Stockout (0 units)
             if inv.current_stock <= 0:
-                if not stockout_alerts and not resolved_stockout:
+                if not stockout_alerts:
                     new_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="STOCKOUT",
@@ -181,7 +181,7 @@ class AlertEscalationEngine:
                     sa.severity = "good"
                     sa.resolved_at = now
 
-                if not lowstock_alerts and not resolved_lowstock:
+                if not lowstock_alerts:
                     new_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="LOW_STOCK",
@@ -206,15 +206,15 @@ class AlertEscalationEngine:
                         la.severity = "critical"
                         la.detail = f"Critical Low Stock: {prod.name} ({inv.sku}) at {inv.current_stock:,} units in {inv.warehouse_id} is below safety buffer ({inv.safety_stock:,})."
 
-            # Condition 3: Warning Low Stock (< Reorder Point)
-            elif inv.current_stock < inv.reorder_point:
+            # Condition 3: Warning Low Stock (<= Reorder Point)
+            elif inv.current_stock <= inv.reorder_point:
                 # Auto-resolve stockout alert
                 for sa in stockout_alerts:
                     sa.status = "Resolved"
                     sa.severity = "good"
                     sa.resolved_at = now
 
-                if not lowstock_alerts and not resolved_lowstock:
+                if not lowstock_alerts:
                     new_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="LOW_STOCK",
@@ -239,7 +239,7 @@ class AlertEscalationEngine:
                         la.severity = "warning"
                         la.detail = f"Low Stock: {prod.name} ({inv.sku}) at {inv.current_stock:,} units in {inv.warehouse_id} is below reorder point ({inv.reorder_point:,})."
 
-            # Condition 4: Healthy Stock (>= Reorder Point) -> Auto-Resolve Deficit Alerts!
+            # Condition 4: Healthy Stock (> Reorder Point) -> Auto-Resolve Deficit Alerts!
             else:
                 for a in stockout_alerts + lowstock_alerts:
                     a.status = "Resolved"
@@ -256,7 +256,7 @@ class AlertEscalationEngine:
                 earliest_b = min(near_expiry_batches, key=lambda b: b.expiry_date)
                 d_exp = (earliest_b.expiry_date - today).days
                 tot_exp_qty = sum(b.quantity for b in near_expiry_batches)
-                if not expiry_alerts and not resolved_expiry:
+                if not expiry_alerts:
                     new_exp_alert = Alert(
                         id=f"ALT-{int(now.timestamp())}-EXP-{inv.sku}-{inv.warehouse_id}",
                         alert_type="EXPIRY_RISK",

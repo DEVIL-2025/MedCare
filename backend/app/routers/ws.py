@@ -39,6 +39,7 @@ ws_manager = ConnectionManager()
 
 
 @router.websocket("/api/ws")
+@router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:

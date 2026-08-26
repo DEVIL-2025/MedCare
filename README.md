@@ -33,12 +33,13 @@
 15. [Environment Variables](#-environment-variables)
 16. [Database Setup & Seeding](#-database-setup--seeding)
 17. [Running the Application](#-running-the-application)
-18. [Automated Testing](#-automated-testing)
-19. [Screenshots](#-screenshots)
-20. [Troubleshooting](#-troubleshooting)
-21. [Project Status](#-project-status)
-22. [Future Enhancements](#-future-enhancements)
-23. [License](#-license)
+18. [Production & 100% Free Cloud Deployment](#-production--100-free-cloud-deployment)
+19. [Automated Testing & Pre-Flight Checks](#-automated-testing--pre-flight-checks)
+20. [Screenshots](#-screenshots)
+21. [Troubleshooting](#-troubleshooting)
+22. [Project Status](#-project-status)
+23. [Future Enhancements](#-future-enhancements)
+24. [License](#-license)
 
 ---
 
@@ -499,17 +500,34 @@ The FastAPI backend exposes structured REST endpoints and WebSocket channels:
 | **Notifications**| `GET`| `/api/notifications` | Query multi-channel dispatch audit log |
 | | `POST` | `/api/notifications/send` | Dispatch manual operational notification |
 | **AI Copilot** | `POST` | `/api/assistant/chat` | Natural-language query interface grounded in live database |
-| **Health** | `GET` | `/health` | Microservice and engine operational health check |
-| **WebSockets** | `WS` | `/ws` | Real-time duplex push notifications for live client updates |
-
----
-
-## 📂 Project Structure
-
-```
+| **Health** | `GET` | `/health` | Microservice and engi```
 medcare-pharma-control-tower-main/
 ├── .env.example                     # Environment template with PostgreSQL & app settings
 ├── README.md                        # Master project documentation
+├── requirements.txt                 # Root Python dependencies
+├── deployment/                      # 🚀 Production & 100% Free Hosting Deployment Center
+│   ├── README.md                    # Master deployment overview & quick-start
+│   ├── FREE_HOSTING_STEP_BY_STEP.md # Step-by-step free hosting tutorial (Vercel + Render + Neon)
+│   ├── .env.free-tier.example       # 100% Free Tier environment template
+│   ├── .env.production.example      # Production enterprise environment template
+│   ├── docker/                      # Container definitions & compose manifests
+│   │   ├── Dockerfile.backend       # Multi-stage Python 3.12 FastAPI backend container
+│   │   ├── Dockerfile.frontend      # React Vite build + Nginx Alpine web server
+│   │   ├── Dockerfile.fullstack     # Unified single-container image (FastAPI + built React SPA)
+│   │   ├── docker-compose.yml       # 3-tier local/staging stack (PostgreSQL + Backend + Frontend)
+│   │   ├── docker-compose.prod.yml  # Hardened production stack with resource limits & log rotation
+│   │   └── nginx.conf               # Production Nginx reverse proxy & SPA client router
+│   ├── cloud-platforms/             # Platform deployment configurations
+│   │   ├── render/render.yaml       # Render 1-click infrastructure blueprint
+│   │   ├── render/Procfile          # Web process runner for Render / Koyeb / Fly.io
+│   │   ├── vercel/vercel.json       # Vercel SPA client rewrite & caching configuration
+│   │   ├── netlify/netlify.toml     # Netlify build and redirect configuration
+│   │   └── railway/railway.toml     # Railway deployment configuration
+│   └── scripts/                     # Deployment automation tools
+│       ├── deploy_check.py          # Automated pre-flight deployment verification tool
+│       ├── build_fullstack.py       # 1-click builder packaging React into FastAPI
+│       ├── start_production.sh      # Linux / macOS production startup script
+│       └── start_production.bat     # Windows production startup script
 ├── backend/                         # Asynchronous FastAPI backend service
 │   ├── requirements.txt             # Python backend dependencies
 │   ├── database/                    # SQL DDL schemas, seed files, and migration utilities
@@ -550,9 +568,10 @@ medcare-pharma-control-tower-main/
 │       │   ├── demand.py, forecasts.py, replenishment.py, transfers.py
 │       │   ├── alerts.py, warehouses.py, scenarios.py, reports.py
 │       │   ├── settings.py, notifications.py, metrics.py, assistant.py, ws.py
+│       │   └── suppliers.py
 │       ├── schemas/                 # Pydantic request and response schemas
-│       ├── services/                # Business logic services (Auth, Notification, etc.)
-│       ├── tests/                   # Pytest automated test suite
+│       ├── services/                # Business logic services (Auth, Gemini AI, Resend Email)
+│       ├── tests/                   # Pytest automated test suite (34 test cases)
 │       └── utils/                   # Data seeders, timezone helpers, and formatters
 │           ├── data_seeder.py       # Comprehensive database population utility
 │           └── timezone.py          # IST/UTC timezone management utilities
@@ -560,19 +579,21 @@ medcare-pharma-control-tower-main/
 │   ├── package.json                 # Frontend dependencies & scripts
 │   ├── vite.config.js               # Vite build configuration
 │   ├── tailwind.config.js           # TailwindCSS styling configuration
+│   ├── vercel.json                  # Vercel deployment rewrite rules
 │   ├── index.html                   # Single Page Application HTML entry
 │   └── src/
 │       ├── main.jsx                 # React root render
 │       ├── App.jsx                  # React Router & protected route definitions
 │       ├── index.css                # Tailwind global styles
 │       ├── api/
-│       │   ├── client.js            # Unified Fetch API client with JWT interceptor
-│       │   └── websocket.js         # WebSocket client with auto-reconnection
+│       │   ├── client.js            # Dynamic Fetch API client (dev & cloud URLs)
+│       │   └── websocket.js         # WebSocket client with auto WSS/WS detection
 │       ├── context/
 │       │   ├── AuthContext.jsx      # Authentication & user permission context
 │       │   └── ControlTowerContext.jsx # Global warehouse filter & refresh trigger
 │       ├── components/
 │       │   ├── layout/              # Sidebar, Topbar, and Page wrapper
+│       │   ├── assistant/           # ChatWidget AI Copilot floating drawer
 │       │   ├── auth/                # ProtectedRoute guard
 │       │   ├── inventory/           # AddProductModal, RecordSaleModal
 │       │   ├── warehouses/          # AddWarehouseModal, EditWarehouseModal
@@ -585,6 +606,17 @@ medcare-pharma-control-tower-main/
 │           ├── DemandForecast.jsx   # ML demand sensing & model lineage
 │           ├── Replenishment.jsx    # ROQ optimization & inter-DC transfers
 │           ├── Alerts.jsx           # SLA-governed alert escalation console
+│           ├── Warehouses.jsx       # Distribution facilities & network map
+│           ├── Reports.jsx          # Financial valuation & CSV reports
+│           ├── ScenarioSimulator.jsx# Parametric stress-testing simulator
+│           ├── UserManagement.jsx   # Admin user & RBAC management
+│           └── Settings.jsx         # SCM system parameters & thresholds
+└── docs/                            # Architectural specifications & guides
+    ├── architecture.md              # System design & pipeline architecture
+    ├── database.md                  # Entity relationships & schema documentation
+    ├── functional-requirements-specification.md # Detailed functional specification
+    └── replenishment-engine.md      # Replenishment math & optimization formulas
+```�─ Alerts.jsx           # SLA-governed alert escalation console
 │           ├── Warehouses.jsx       # Distribution facilities & network map
 │           ├── Reports.jsx          # Financial valuation & CSV reports
 │           ├── ScenarioSimulator.jsx# Parametric stress-testing simulator

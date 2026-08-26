@@ -1,4 +1,14 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location.port !== '5173') {
+    return '/api';
+  }
+  return 'http://localhost:8000/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 /**
  * Serializes params object into a valid query string, automatically 
@@ -248,7 +258,20 @@ export const api = {
 
   // Notifications
   getNotifications: (params = {}, options) => request(`/notifications${buildQueryString(params)}`, options),
+  triggerLowStockCheck: (params = {}, options) =>
+    request(`/notifications/low-stock-check${buildQueryString(params)}`, {
+      method: 'POST',
+      ...options,
+    }),
 
   // Metrics
   getMetrics: (options) => request('/metrics', options),
+
+  // AI Assistant
+  chatWithAssistant: (data, options) =>
+    request('/assistant/chat', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      ...options,
+    }),
 };

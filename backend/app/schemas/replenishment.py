@@ -1,9 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date, datetime
 
 
 class ReplenishmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     priority: str
     sku: str
@@ -24,11 +26,10 @@ class ReplenishmentResponse(BaseModel):
     reason_impact: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class PurchaseOrderResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     supplier: str
     items_count: int = 1
@@ -40,6 +41,3 @@ class PurchaseOrderResponse(BaseModel):
     warehouse: str
     qty: int
     eta: Optional[str] = None
-
-    class Config:
-        from_attributes = True

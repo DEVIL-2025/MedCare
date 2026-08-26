@@ -182,9 +182,9 @@ async def get_inventory(
             risk = "critical" if group["hasCritical"] else ("high" if group["hasLowStock"] else "low")
             
             # Quick filters
-            if quick_filter == "low" and not group["hasLowStock"]:
+            if quick_filter == "low" and not (group["hasLowStock"] or group["hasCritical"] or group["currentStock"] <= group["reorderPoint"]):
                 continue
-            elif quick_filter == "out" and group["currentStock"] > 0:
+            elif quick_filter == "out" and not (group["hasCritical"] or group["currentStock"] == 0 or group["availableStock"] == 0 or any(w.get("currentStock", 0) <= 0 or w.get("status") in ["Critical", "Out Of Stock", "CRITICAL", "OUT_OF_STOCK"] for w in group["warehouseBreakdown"])):
                 continue
             elif quick_filter == "expiring" and group["earliestExpiryDays"] > 60:
                 continue
@@ -227,9 +227,9 @@ async def get_inventory(
         days_to_exp = (earliest_batch.expiry_date - today).days if earliest_batch else 999
 
         # Quick filters
-        if quick_filter == "low" and inv.status != "LOW_STOCK":
+        if quick_filter == "low" and not (inv.status in ["LOW_STOCK", "CRITICAL", "OUT_OF_STOCK"] or inv.current_stock <= inv.reorder_point):
             continue
-        elif quick_filter == "out" and inv.status != "OUT_OF_STOCK":
+        elif quick_filter == "out" and not (inv.status in ["OUT_OF_STOCK", "CRITICAL"] or inv.current_stock <= 0 or (inv.current_stock - (inv.reserved_stock or 0)) <= 0):
             continue
         elif quick_filter == "expiring" and days_to_exp > 60:
             continue

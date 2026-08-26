@@ -12,10 +12,15 @@ const toneMap = {
   info: { bg: 'bg-slate2-100', text: 'text-slate2-700' },
 };
 
-export default function StatCard({ icon: Icon, label, value, delta, deltaPositive = true, subtext, tone = 'forest' }) {
+export default function StatCard({ icon: Icon, label, value, delta, deltaPositive = true, subtext, tone = 'forest', onClick }) {
   const t = toneMap[tone] || toneMap.forest || { bg: 'bg-forest-100', text: 'text-forest-700' };
   return (
-    <div className="bg-white rounded-lg border border-ink-100 p-4 shadow-card">
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-lg border border-ink-100 p-4 shadow-card transition-all ${
+        onClick ? 'cursor-pointer hover:border-forest-500/50 hover:shadow-md' : ''
+      }`}
+    >
       <div className="flex items-center justify-between mb-2.5">
         <span className="text-xs text-ink-500">{label}</span>
         {Icon && (

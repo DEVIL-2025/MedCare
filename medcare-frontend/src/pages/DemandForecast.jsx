@@ -290,7 +290,7 @@ export default function DemandForecast() {
       {/* Model Transparency, Lineage & Feature Attribution */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* ML Model Transparency & Lineage Card */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
+        <div className="lg:col-span-3 bg-white rounded-lg border border-ink-100 shadow-card p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-[14.5px] font-bold text-ink-900 flex items-center gap-1.5">
               <Cpu size={16} className="text-forest-700" /> Model Transparency & Lineage
@@ -300,32 +300,38 @@ export default function DemandForecast() {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-[12px]">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 text-[12px]">
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Model Architecture</span>
               <span className="font-semibold text-ink-800 text-[13px]">{modelTransparency?.model_name || 'RandomForestRegressor'}</span>
             </div>
+
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Primary DB Source</span>
               <span className="font-mono font-semibold text-forest-800 text-[13px]">{lineage.primary_table || 'demand_history'}</span>
             </div>
+
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Training Set Volume</span>
               <span className="font-mono font-semibold text-ink-800 text-[13px]">{lineage.training_samples?.toLocaleString() || '16,848'} rows</span>
             </div>
+
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Hold-Out Validation</span>
               <span className="font-mono font-semibold text-ink-800 text-[13px]">{lineage.validation_samples?.toLocaleString() || '4,212'} rows (20%)</span>
             </div>
+
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Validation MAE</span>
               <span className="font-mono font-bold text-forest-700 text-[13px]">±{metrics.mae_units || 21.8} units</span>
             </div>
+
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Weighted Abs Error (WAPE)</span>
               <span className="font-mono font-bold text-forest-700 text-[13px]">{metrics.wape_pct || 7.1}%</span>
             </div>
-            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100 sm:col-span-2">
+
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100 sm:col-span-2 lg:col-span-2">
               <span className="text-ink-500 block text-[11px]">R² Accuracy Score</span>
               <span className="font-mono font-bold text-forest-700 text-[13px]">{metrics.r2_score || 0.971}</span>
             </div>

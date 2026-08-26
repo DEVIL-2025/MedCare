@@ -1,0 +1,76 @@
+# ==============================================================================
+# MedCare Pharma Control Tower - Render Cloud Blueprint (100% Free Tier Compatible)
+# https://render.com/docs/blueprint-spec
+# ==============================================================================
+
+version: "1"
+
+databases:
+  - name: medcare-postgres
+    databaseName: medcare_scm
+    user: postgres
+    plan: free # 100% Free on Render for 90 days, or use Neon.tech forever-free connection string
+    ipAllowList: [] # Allow all connections
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. FastAPI Backend Web Service
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: medcare-backend
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DEBUG
+        value: "false"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: medcare-postgres
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ADMIN_INITIAL_PASSWORD
+        value: "Admin@12345"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+
+  # ----------------------------------------------------------------------------
+  # 2. React Frontend Static Site (Zero Cost, Global CDN, No Spin-Down)
+  # ----------------------------------------------------------------------------
+  - type: static
+    name: medcare-frontend
+    runtime: static
+    plan: free
+    region: oregon
+    rootDir: medcare-frontend
+    buildCommand: "npm ci && npm run build"
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20.12.0"
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: medcare-backend
+          property: host
+          transformation: https://{value}/api
+      - key: VITE_WS_URL
+        fromService:
+          type: web
+          name: medcare-backend
+          property: host
+          transformation: wss://{value}/api/ws

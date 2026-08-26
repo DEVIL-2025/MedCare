@@ -10,6 +10,8 @@ from backend.app.services.notification_service import NotificationService
 router = APIRouter(prefix="/api/notifications", tags=["Notifications"])
 
 
+from backend.app.utils.timezone import format_ist_datetime, to_ist_iso
+
 @router.get("")
 async def get_notification_logs(
     channel: Optional[str] = None,
@@ -34,7 +36,8 @@ async def get_notification_logs(
             "subject": log.subject or "Alert Notification",
             "messageBody": log.message_body,
             "status": log.status,
-            "timestamp": log.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": format_ist_datetime(log.timestamp, "%d %b %Y, %I:%M:%S %p IST") if log.timestamp else "—",
+            "iso": to_ist_iso(log.timestamp)
         }
         for log in logs
     ]
@@ -64,3 +67,34 @@ async def send_test_notification(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/low-stock-check")
+@router.get("/low-stock-check")
+async def run_low_stock_email_check(
+    sku: Optional[str] = None,
+    warehouse_id: Optional[str] = None,
+    force_ignore_cooldown: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Scans PostgreSQL for items below reorder threshold and dispatches low-stock email alerts.
+    Supports 24-hour deduplication and can be called by cron jobs or automated schedulers.
+    """
+    from backend.app.services.email_alert_service import EmailAlertService
+    try:
+        dispatched = await EmailAlertService.check_and_dispatch_low_stock_email_alerts(
+            session=db,
+            target_sku=sku,
+            target_warehouse_id=warehouse_id,
+            force_ignore_cooldown=force_ignore_cooldown
+        )
+        return {
+            "success": True,
+            "dispatched_count": len(dispatched),
+            "alerts": dispatched,
+            "message": f"Processed low-stock email check. {len(dispatched)} alerts dispatched."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed executing low-stock check: {str(e)}")
+

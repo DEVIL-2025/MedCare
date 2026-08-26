@@ -16,6 +16,7 @@ from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
 from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
 from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.services.notification_service import NotificationService
+from backend.app.services.email_alert_service import trigger_async_low_stock_check
 from backend.app.routers.ws import ws_manager
 from backend.app.utils.timezone import get_utc_now, format_ist_datetime, to_ist_iso, get_now_ist
 
@@ -103,6 +104,12 @@ async def create_transaction(
             await ReplenishmentEngine.sync_recommendations(db)
 
             await db.commit()
+
+            # Automatic Low-Stock Email Trigger post-commit for source warehouse
+            avail_src = (inv_src.current_stock or 0) - (inv_src.reserved_stock or 0)
+            reorder_src = inv_src.reorder_point or 0
+            if avail_src <= reorder_src:
+                trigger_async_low_stock_check(sku=payload.sku, warehouse_id=src_wh)
 
             # Broadcast live events
             await ws_manager.broadcast({
@@ -195,6 +202,14 @@ async def create_transaction(
         await ReplenishmentEngine.sync_recommendations(db)
 
         await db.commit()
+
+        # Automatic Low-Stock Email Trigger post-commit:
+        # Check if updated available stock is at or below reorder threshold
+        avail_stock = (inv.current_stock or 0) - (inv.reserved_stock or 0)
+        reorder_point = inv.reorder_point or 0
+        tx_type = (payload.transaction_type or "").upper()
+        if (avail_stock <= reorder_point) or tx_type in ["SALE", "CONSUMPTION", "TRANSFER_OUT", "TRANSFER"] or (tx_type == "ADJUSTMENT" and payload.quantity < 0):
+            trigger_async_low_stock_check(sku=payload.sku, warehouse_id=payload.warehouse_id)
 
         # Broadcast live event via WebSocket
         event_payload = {

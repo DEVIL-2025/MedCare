@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import date, datetime
 
@@ -17,6 +17,8 @@ class ForecastSummary(BaseModel):
 
 
 class DemandSurgeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     sku: str
     product_name: Optional[str]
@@ -28,6 +30,3 @@ class DemandSurgeResponse(BaseModel):
     status: str
     explanation: Optional[str]
     detected_at: datetime
-
-    class Config:
-        from_attributes = True

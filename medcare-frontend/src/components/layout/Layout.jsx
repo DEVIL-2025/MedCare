@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import ChatWidget from '../assistant/ChatWidget';
 
 const pageMeta = {
   '/': { title: 'Executive Dashboard', subtitle: 'Supply chain control tower' },
@@ -18,19 +20,28 @@ const pageMeta = {
 export default function Layout() {
   const location = useLocation();
   const meta = pageMeta[location.pathname] || { title: '', subtitle: '' };
+  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
 
   return (
     <div className="flex h-screen bg-cream">
-      <Sidebar />
+      <Sidebar
+        isAiAssistantOpen={isAiAssistantOpen}
+        onToggleAiAssistant={() => setIsAiAssistantOpen((prev) => !prev)}
+      />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Topbar
           title={meta.title}
           subtitle={meta.subtitle}
         />
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-6 relative">
           <Outlet />
         </main>
       </div>
+      {/* Global AI SCM Assistant Drawer / Panel */}
+      <ChatWidget
+        isOpen={isAiAssistantOpen}
+        onClose={() => setIsAiAssistantOpen(false)}
+      />
     </div>
   );
 }

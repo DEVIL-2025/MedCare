@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -16,6 +16,8 @@ class TransactionCreate(BaseModel):
 
 
 class TransactionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     transaction_type: str
     sku: str
@@ -29,6 +31,3 @@ class TransactionResponse(BaseModel):
     reason: Optional[str]
     performed_by: str
     timestamp: datetime
-
-    class Config:
-        from_attributes = True

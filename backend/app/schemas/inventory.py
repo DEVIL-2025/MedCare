@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime, date
 
@@ -20,6 +20,8 @@ class ProductCreate(BaseModel):
 
 
 class ProductResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     sku: str
     name: str
     category: str
@@ -32,9 +34,6 @@ class ProductResponse(BaseModel):
     unit_cost: float
     is_temperature_sensitive: bool
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 
 class SaleCreate(BaseModel):
@@ -61,6 +60,8 @@ class InventoryBase(BaseModel):
 
 
 class InventoryResponse(InventoryBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     available_stock: int
     product_name: Optional[str] = None
@@ -70,11 +71,10 @@ class InventoryResponse(InventoryBase):
     expiry: Optional[str] = "-"
     last_recalculated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
 
 class BatchResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     sku: str
     warehouse_id: str
@@ -86,6 +86,3 @@ class BatchResponse(BaseModel):
     days_to_expiry: int
     status: str
     is_quarantined: bool
-
-    class Config:
-        from_attributes = True

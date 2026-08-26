@@ -10,6 +10,8 @@ from backend.app.models.auth import User, AuditLog
 from backend.app.schemas.settings import SettingsUpdateRequest
 from backend.app.dependencies.auth import require_permission, get_optional_user
 
+from backend.app.utils.timezone import format_ist_datetime, to_ist_iso
+
 router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
 
@@ -25,22 +27,15 @@ async def get_system_settings(db: AsyncSession = Depends(get_db)) -> Dict[str, A
     user_res = await db.execute(select(User).order_by(User.created_at.asc()))
     db_users = user_res.scalars().all()
 
-    if db_users:
-        users = [
-            {
-                "name": u.full_name,
-                "email": u.email,
-                "role": u.role.name if u.role else u.role_id,
-                "status": "Active" if u.is_active else "Inactive"
-            }
-            for u in db_users
-        ]
-    else:
-        users = [
-            {"name": "Dr. Aditi Rao", "email": "aditi.rao@medcarepharma.com", "role": "Regional SCM Manager", "status": "Active"},
-            {"name": "Rohan Mehta", "email": "rohan.mehta@medcarepharma.com", "role": "Regional SCM Manager", "status": "Active"},
-            {"name": "System Administrator", "email": "admin@medcarepharma.com", "role": "ADMIN", "status": "Active"},
-        ]
+    users = [
+        {
+            "name": u.full_name,
+            "email": u.email,
+            "role": u.role.name if u.role else u.role_id,
+            "status": "Active" if u.is_active else "Inactive"
+        }
+        for u in db_users
+    ] if db_users else []
 
     # Query latest audit logs from PostgreSQL
     audit_res = await db.execute(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(10))
@@ -51,7 +46,8 @@ async def get_system_settings(db: AsyncSession = Depends(get_db)) -> Dict[str, A
             {
                 "action": f"{a.action}: {a.new_value or a.module}",
                 "user": a.user_id,
-                "time": a.created_at.strftime("%d %b %Y, %I:%M %p") if a.created_at else "Recent"
+                "time": format_ist_datetime(a.created_at, "%d %b %Y, %I:%M:%S %p IST") if a.created_at else "Recent",
+                "iso": to_ist_iso(a.created_at)
             }
             for a in db_audits
         ]
@@ -62,7 +58,8 @@ async def get_system_settings(db: AsyncSession = Depends(get_db)) -> Dict[str, A
             {
                 "action": f"{tx.transaction_type.replace('_', ' ').title()}: {tx.quantity:,} units of {tx.sku} @ {tx.warehouse_id}",
                 "user": "SCM Operator",
-                "time": tx.timestamp.strftime("%d %b %Y, %I:%M %p")
+                "time": format_ist_datetime(tx.timestamp, "%d %b %Y, %I:%M:%S %p IST") if tx.timestamp else "Recent",
+                "iso": to_ist_iso(tx.timestamp)
             }
             for tx in tx_logs
         ]

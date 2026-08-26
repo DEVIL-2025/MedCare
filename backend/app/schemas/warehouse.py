@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -18,6 +18,8 @@ class WarehouseCreate(BaseModel):
 
 
 class WarehouseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     location: str
@@ -30,6 +32,3 @@ class WarehouseResponse(BaseModel):
     map_x: Optional[float] = 45.0
     map_y: Optional[float] = 50.0
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

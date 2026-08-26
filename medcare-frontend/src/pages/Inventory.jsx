@@ -19,9 +19,19 @@ import { formatDate, formatDateTime } from '../utils/dateUtils';
 
 const quickFilters = [
   { key: 'all', label: 'All Items', test: () => true },
-  { key: 'low', label: 'Low Stock', test: (p) => p.status === 'Low Stock' || p.status === 'LOW_STOCK' || (Number(p.currentStock || 0) < Number(p.reorderPoint || 0) && Number(p.currentStock || 0) > 0) },
-  { key: 'out', label: 'Out of Stock', test: (p) => p.status === 'Out of Stock' || p.status === 'OUT_OF_STOCK' || p.status === 'CRITICAL' || Number(p.currentStock || 0) === 0 },
-  { key: 'expiring', label: 'Expiring Soon (<60d)', test: (p) => Number(p.daysToExpiry || 999) <= 60 || (p.batches && p.batches.some(b => Number(b.daysToExpiry) <= 60)) },
+  { key: 'low', label: 'Low Stock', test: (p) => p.status === 'Low Stock' || p.status === 'LOW_STOCK' || p.status === 'Critical' || p.status === 'CRITICAL' || p.hasLowStock || p.hasCritical || (Number(p.currentStock || 0) <= Number(p.reorderPoint || 0)) },
+  { key: 'out', label: 'Stockout / Critical', test: (p) => (
+      p.status === 'Out of Stock' ||
+      p.status === 'OUT_OF_STOCK' ||
+      p.status === 'Critical' ||
+      p.status === 'CRITICAL' ||
+      p.hasCritical ||
+      Number(p.currentStock || 0) <= 0 ||
+      Number(p.availableStock || 0) <= 0 ||
+      p.risk === 'critical' ||
+      (p.warehouseBreakdown && p.warehouseBreakdown.some(w => Number(w.currentStock || 0) <= 0 || w.status === 'Critical' || w.status === 'Out Of Stock'))
+  )},
+  { key: 'expiring', label: 'Expiring Soon (<60d)', test: (p) => Number(p.daysToExpiry || 999) <= 60 || Number(p.earliestExpiryDays || 999) <= 60 || (p.batches && p.batches.some(b => Number(b.daysToExpiry) <= 60)) },
   { key: 'slow', label: 'Overstock', test: (p) => p.status === 'OVERSTOCK' || p.status === 'Overstock' || Number(p.currentStock || 0) > Number(p.reorderPoint || 0) * 1.8 },
 ];
 
@@ -224,6 +234,7 @@ export default function Inventory() {
           subtext={`Across ${selectedWarehouse === 'All' ? '8 Active DCs' : selectedWarehouse}`}
           icon={Boxes}
           tone="neutral"
+          onClick={() => setQuickFilter('all')}
         />
         <StatCard
           label="Active SKU Count"
@@ -231,6 +242,7 @@ export default function Inventory() {
           subtext={`${categories.length} Categories Tracked`}
           icon={Package}
           tone="good"
+          onClick={() => setQuickFilter('all')}
         />
         <StatCard
           label="Low Stock SKUs"
@@ -238,6 +250,7 @@ export default function Inventory() {
           subtext="Below Reorder Point (ROP)"
           icon={AlertOctagon}
           tone={lowStockCount > 0 ? 'warning' : 'good'}
+          onClick={() => setQuickFilter('low')}
         />
         <StatCard
           label="Stockout / Critical"
@@ -245,6 +258,7 @@ export default function Inventory() {
           subtext="Immediate Inbound Required"
           icon={PackageX}
           tone={outOfStockCount > 0 ? 'critical' : 'good'}
+          onClick={() => setQuickFilter('out')}
         />
       </div>
 

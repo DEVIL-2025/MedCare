@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Package, TrendingUp, Truck, Bell, Building2,
-  FileBarChart, GitBranch, Settings as SettingsIcon, Cross, Users
+  FileBarChart, GitBranch, Settings as SettingsIcon, Cross, Users,
+  Bot, Sparkles
 } from 'lucide-react';
 import { useControlTower } from '../../context/ControlTowerContext';
 import { useAuth } from '../../context/AuthContext';
 
-export default function Sidebar() {
+export default function Sidebar({ isAiAssistantOpen, onToggleAiAssistant }) {
   const { activeAlertCount } = useControlTower();
   const { isAdmin } = useAuth();
 
@@ -56,6 +57,28 @@ export default function Sidebar() {
             {badge && <span className="text-[10px] bg-brick-600 text-white rounded px-1.5 py-0.5">{badge}</span>}
           </NavLink>
         ))}
+
+        {/* Standalone Ask SCM AI Navigation Action */}
+        <div className="pt-2 mt-2 border-t border-white/10">
+          <button
+            type="button"
+            onClick={onToggleAiAssistant}
+            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-md text-[13px] transition-colors border-l-2 text-left cursor-pointer group ${
+              isAiAssistantOpen
+                ? 'bg-forest-800 text-white border-forest-500 shadow-inner'
+                : 'text-cream-100/65 hover:bg-forest-800/60 hover:text-white border-transparent'
+            }`}
+            title="Open MedCare AI Assistant"
+          >
+            <span className="flex items-center gap-2.5">
+              <Bot size={15} className={isAiAssistantOpen ? 'text-emerald-400' : 'text-emerald-300/80 group-hover:text-emerald-300'} />
+              <span>Ask SCM AI</span>
+            </span>
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded px-1.5 py-0.5 flex items-center gap-1 font-mono">
+              <Sparkles size={9} /> AI
+            </span>
+          </button>
+        </div>
       </nav>
 
       <div className="p-3 border-t border-white/10 text-center">

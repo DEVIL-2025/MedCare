@@ -1,9 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
 
 class AlertResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     type: str
     category: str  # critical, warning, medium, info, good
@@ -18,9 +20,6 @@ class AlertResponse(BaseModel):
     escalation_level: int
     is_escalated: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class AlertActionRequest(BaseModel):

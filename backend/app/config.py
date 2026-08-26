@@ -1,12 +1,17 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     APP_NAME: str = "MedCare Pharma SCM Control Tower"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
     
+    # CORS Configuration (comma-separated or wildcard '*')
+    CORS_ORIGINS: str = "*"
+
     # Database Configuration
     DATABASE_URL: Optional[str] = None
     DB_HOST: Optional[str] = None
@@ -22,7 +27,10 @@ class Settings(BaseSettings):
             pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
             return f"postgresql://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         if self.DATABASE_URL:
-            return self.DATABASE_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
+            url = self.DATABASE_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
+            return url
         return "sqlite:///./medcare_scm.db"
 
     @property
@@ -31,8 +39,19 @@ class Settings(BaseSettings):
             pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
             return f"postgresql+asyncpg://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         if self.DATABASE_URL:
-            return self.DATABASE_URL
+            url = self.DATABASE_URL
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url
         return "sqlite+aiosqlite:///./medcare_scm.db"
+    
+    @property
+    def allowed_cors_origins(self) -> List[str]:
+        if not self.CORS_ORIGINS or self.CORS_ORIGINS.strip() == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
     
     # SCM Engine Parameters
     SERVICE_LEVEL: float = 0.95  # 95% service level
@@ -64,14 +83,19 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
     # Initial Admin Seed Configuration
-    ADMIN_EMAIL: str = "admin@medcarepharma.com"
-    ADMIN_USER_ID: str = "admin"
-    ADMIN_FULL_NAME: str = "System Administrator"
     ADMIN_INITIAL_PASSWORD: str = "Admin@12345"
+    
+    # Gemini AI Configuration
+    GEMINI_API_KEY: str = ""
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    # Email & Alert Dispatch Configuration (Resend / SMTP)
+    RESEND_API_KEY: str = ""
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    EMAIL_FROM: str = ""
+    APP_FRONTEND_URL: str = "http://localhost:5173"
 
 
 settings = Settings()
