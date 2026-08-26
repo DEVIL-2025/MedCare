@@ -219,16 +219,13 @@ flowchart TB
 * **16-Week Projected Trajectory**: Line graph tracking projected inventory levels and stockout occurrences over a 4-month horizon.
 * **Scenario History Log**: Historical repository of previous simulation runs for strategic planning review.
 
-### 9. Grounded AI Supply Chain Copilot (Assistant Widget)
-* **Natural Language Copilot**: Grounded natural language query engine querying the live PostgreSQL database for instant stock checks, batch expiry audits, shortage explanations, and transfer suggestions.
-* **Suggested Actions**: Context-aware follow-up action prompts allowing planners to execute transfers or navigate directly to impacted SKUs.
 
-### 10. User Management, RBAC & Audit Trail (`/users` — Admin Only)
+### 9. User Management, RBAC & Audit Trail (`/users` — Admin Only)
 * **Account Administration**: Create, update, activate/deactivate user accounts, and assign user roles (`ADMIN` or `MANAGER`).
 * **Password Management**: Administrative password reset modal with temporary credential generation.
 * **Immutable System Audit Logs (`/api/audit-logs`)**: Searchable audit log capturing every administrative mutation, affected module, entity ID, before/after values, client IP address, and UTC timestamp.
 
-### 11. System Settings (`/settings`)
+### 10. System Settings (`/settings`)
 * **SCM Engine Configuration**: Administrative interface to inspect and configure global operational parameters (e.g., Service Level targets, Lead Time Buffers, Expiry Warning Thresholds, Auto-Approval Financial Limits).
 
 ---
