@@ -140,11 +140,18 @@ async def get_dashboard_data(
             "reorderPoint": int(avg_reorder_point)
         })
 
-    # 6. Executive Recommendation Card (Highest priority current action from DB)
+    # 6. Executive Recommendation Card (Highest priority validated action from DB)
     active_wh_subquery = select(Warehouse.id).where(Warehouse.is_active != False)
     trf_query = (
-        select(InventoryTransfer, Product)
+        select(InventoryTransfer, Product, Inventory)
         .join(Product, InventoryTransfer.sku == Product.sku)
+        .join(
+            Inventory,
+            and_(
+                Inventory.sku == InventoryTransfer.sku,
+                Inventory.warehouse_id == InventoryTransfer.source_warehouse_id
+            )
+        )
         .where(
             Product.is_active != False,
             InventoryTransfer.source_warehouse_id.in_(active_wh_subquery),
@@ -161,18 +168,40 @@ async def get_dashboard_data(
             )
         )
     trf_res = await db.execute(trf_query)
-    trf_item = trf_res.first()
+    trf_candidates = trf_res.all()
 
     executive_recommendation = None
-    if trf_item:
-        primary_transfer, prod = trf_item
+    stale_transfers_to_clean = []
+
+    for primary_transfer, prod, src_inv in trf_candidates:
+        avail_stock = src_inv.available_stock if src_inv.available_stock is not None else src_inv.current_stock
+        min_transfer_threshold = min(50, prod.moq)
+
+        # Check if source DC has sufficient stock to fulfill transfer
+        if avail_stock < min_transfer_threshold:
+            stale_transfers_to_clean.append(primary_transfer)
+            continue
+
+        # If available stock has dropped below original requested transfer quantity, dynamically scale down
+        final_qty = primary_transfer.quantity
+        if avail_stock < primary_transfer.quantity:
+            scaled_qty = max(min_transfer_threshold, int(avail_stock // 50 * 50)) if avail_stock >= 50 else avail_stock
+            if scaled_qty < min_transfer_threshold:
+                stale_transfers_to_clean.append(primary_transfer)
+                continue
+            final_qty = scaled_qty
+            primary_transfer.quantity = scaled_qty
+            primary_transfer.available_at_source = avail_stock
+            primary_transfer.estimated_savings_inr = round(scaled_qty * prod.unit_cost * 0.85, 2)
+            primary_transfer.reason = f"FEFO Transfer: {scaled_qty:,} units from {primary_transfer.source_warehouse_id} to {primary_transfer.destination_warehouse_id} (scaled to live stock)."
+
         savings_str = f"₹{primary_transfer.estimated_savings_inr / 100000.0:.2f} Lakhs" if primary_transfer.estimated_savings_inr >= 100000 else f"₹{primary_transfer.estimated_savings_inr:,.0f}"
         executive_recommendation = {
             "id": primary_transfer.id,
             "action_type": "transfer",
             "transfer_id": primary_transfer.id,
             "recommendation_id": None,
-            "what": f"Transfer {primary_transfer.quantity:,} units of {prod.name} from {primary_transfer.source_warehouse_id} to {primary_transfer.destination_warehouse_id}",
+            "what": f"Transfer {final_qty:,} units of {prod.name} from {primary_transfer.source_warehouse_id} to {primary_transfer.destination_warehouse_id}",
             "product": f"{prod.name} ({prod.sku})",
             "from": f"{primary_transfer.source_warehouse_id}",
             "to": f"{primary_transfer.destination_warehouse_id}",
@@ -180,7 +209,14 @@ async def get_dashboard_data(
             "expected_impact": "Prevents stockout, utilizes near-expiry stock, saves emergency purchase costs.",
             "savings": savings_str
         }
-    else:
+        break
+
+    if stale_transfers_to_clean:
+        for stale_trf in stale_transfers_to_clean:
+            await db.delete(stale_trf)
+        await db.commit()
+
+    if not executive_recommendation:
         # Query top replenishment recommendation prioritized by urgency (critical > high > medium > low) and estimated cost
         priority_case = case(
             (ReplenishmentRecommendation.priority == "critical", 1),

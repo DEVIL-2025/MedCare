@@ -16,6 +16,7 @@ from backend.app.models.escalation import AlertEscalation
 from backend.app.models.sales import SalesOrder
 from backend.app.models.settings import SystemSetting
 from backend.app.models.auth import User, Role, Permission, RolePermission, AuditLog
+from backend.app.models.supplier import Supplier
 
 __all__ = [
     "Product",
@@ -45,5 +46,6 @@ __all__ = [
     "Role",
     "Permission",
     "RolePermission",
-    "AuditLog"
+    "AuditLog",
+    "Supplier"
 ]

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ShoppingCart, PackagePlus, ArrowRightLeft, SlidersHorizontal, AlertCircle, CheckCircle2, FlaskConical, Building, FileText, UserCheck, Calendar } from 'lucide-react';
+import { ShoppingCart, PackagePlus, ArrowRightLeft, SlidersHorizontal, AlertCircle, CheckCircle2, FlaskConical } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { api } from '../../api/client';
 
@@ -52,6 +52,7 @@ export default function TransactionModal({
   const initialSkuVal = initialSku || defaultProduct?.sku || 'P-1065';
   const initialWhVal = resolveValidWarehouseId(initialWarehouse, defaultProduct, [], 'MUM-01');
   const initStockVal = currentStock || Number(defaultProduct?.currentStock || defaultProduct?.current_stock || 0);
+  const initCostVal = defaultProduct?.unitCost || defaultProduct?.unit_cost || 25.0;
 
   const [type, setType] = useState('SALE');
   const [sku, setSku] = useState(initialSkuVal);
@@ -59,6 +60,7 @@ export default function TransactionModal({
   const [quantity, setQuantity] = useState(250);
   const [warehouses, setWarehouses] = useState([]);
   const [liveStock, setLiveStock] = useState(initStockVal);
+  const [dbUnitCost, setDbUnitCost] = useState(Number(initCostVal));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -67,10 +69,11 @@ export default function TransactionModal({
   // Sale
   const [customerName, setCustomerName] = useState('Apollo Hospitals Mumbai');
   const [salesChannel, setSalesChannel] = useState('Hospital');
-  const [unitPrice, setUnitPrice] = useState(25.0);
+  const [unitPrice, setUnitPrice] = useState(Number(initCostVal));
 
   // Receipt
   const [supplierName, setSupplierName] = useState('HealthGen Pharma');
+  const [suppliersList, setSuppliersList] = useState([]);
   const [poNumber, setPoNumber] = useState('PO-8845');
   const [batchId, setBatchId] = useState('');
   const [expiryDate, setExpiryDate] = useState(() => {
@@ -78,7 +81,7 @@ export default function TransactionModal({
     d.setFullYear(d.getFullYear() + 2);
     return d.toISOString().split('T')[0];
   });
-  const [unitCost, setUnitCost] = useState(defaultProduct?.unitCost || 25.0);
+  const [unitCost, setUnitCost] = useState(Number(initCostVal));
 
   // Adjustment
   const [actualPhysicalCount, setActualPhysicalCount] = useState(initStockVal);
@@ -94,10 +97,14 @@ export default function TransactionModal({
   const [department, setDepartment] = useState('Emergency Clinical Ward');
   const [consumptionReason, setConsumptionReason] = useState('Routine Hospital Inpatient Dispensing');
 
+  // Initial metadata loading (Warehouses & Suppliers)
   useEffect(() => {
     async function loadData() {
       try {
-        const whs = await api.getWarehouses();
+        const [whs, supps] = await Promise.all([
+          api.getWarehouses(),
+          api.getSuppliers()
+        ]);
         const list = Array.isArray(whs) ? whs : (whs?.overview || []);
         setWarehouses(list);
         if (list.length > 0) {
@@ -107,13 +114,22 @@ export default function TransactionModal({
             setDestinationWarehouse(otherDcs[0].id);
           }
         }
+        const sList = Array.isArray(supps) ? supps : [];
+        setSuppliersList(sList);
+        if (sList.length > 0) {
+          setSupplierName((prev) => {
+            if (prev && sList.some(s => s.name === prev)) return prev;
+            return sList[0].name;
+          });
+        }
       } catch (err) {
-        console.warn('Failed to load warehouses for modal:', err);
+        console.warn('Failed to load metadata for modal:', err);
       }
     }
     loadData();
   }, []);
 
+  // Update default states when defaultProduct prop changes
   useEffect(() => {
     if (defaultProduct) {
       if (defaultProduct.sku) setSku(defaultProduct.sku);
@@ -122,8 +138,72 @@ export default function TransactionModal({
       const st = Number(defaultProduct.currentStock || defaultProduct.current_stock || 0);
       setLiveStock(st);
       setActualPhysicalCount(st);
+      const cost = defaultProduct.unitCost || defaultProduct.unit_cost;
+      if (cost !== undefined && cost !== null) {
+        const numCost = Number(cost);
+        setDbUnitCost(numCost);
+        setUnitCost(numCost);
+        setUnitPrice(numCost);
+      }
     }
   }, [defaultProduct, warehouses]);
+
+  // Live stock & unit cost recalculation from DB whenever SKU or Warehouse changes
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchStockForSelection() {
+      const cleanSku = String(sku || '').trim().toUpperCase();
+      const cleanWh = String(warehouse || '').trim();
+      if (!cleanSku || !cleanWh || ['all', 'all warehouses', 'network', 'network rollup', 'all_dcs'].includes(cleanWh.toLowerCase())) {
+        return;
+      }
+
+      // Fast synchronous lookup if defaultProduct has pre-fetched warehouseBreakdown
+      if (defaultProduct?.warehouseBreakdown && Array.isArray(defaultProduct.warehouseBreakdown)) {
+        const wbMatch = defaultProduct.warehouseBreakdown.find(
+          (wb) => String(wb.warehouseId || wb.warehouse).toUpperCase() === cleanWh.toUpperCase()
+        );
+        if (wbMatch && isMounted) {
+          const st = Number(wbMatch.currentStock ?? wbMatch.current_stock ?? 0);
+          setLiveStock(st);
+          setActualPhysicalCount(st);
+        }
+      }
+
+      // Live database query for guaranteed PostgreSQL state
+      try {
+        const invRes = await api.getInventory({ warehouse: cleanWh, search: cleanSku });
+        if (!isMounted) return;
+        const items = Array.isArray(invRes) ? invRes : (invRes?.items || []);
+        const matched = items.find(
+          (i) => i.sku?.toUpperCase() === cleanSku && (i.warehouse === cleanWh || i.warehouse_id === cleanWh)
+        ) || items.find((i) => i.sku?.toUpperCase() === cleanSku);
+
+        if (matched && isMounted) {
+          const stockVal = Number(matched.currentStock ?? matched.current_stock ?? 0);
+          setLiveStock(stockVal);
+          setActualPhysicalCount(stockVal);
+          const cost = matched.unitCost ?? matched.unit_cost;
+          if (cost !== undefined && cost !== null) {
+            const numCost = Number(cost);
+            setDbUnitCost(numCost);
+            setUnitCost((prev) => (prev === '' || prev === null || isNaN(Number(prev)) ? numCost : prev));
+            setUnitPrice((prev) => (prev === '' || prev === null || isNaN(Number(prev)) ? numCost : prev));
+          }
+        } else if (isMounted && items.length === 0) {
+          setLiveStock(0);
+          setActualPhysicalCount(0);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch live stock for warehouse selection:', err);
+      }
+    }
+
+    fetchStockForSelection();
+    return () => {
+      isMounted = false;
+    };
+  }, [sku, warehouse, defaultProduct]);
 
   // Adjustments calculate variance delta
   const isAdjustment = type === 'ADJUSTMENT';
@@ -139,6 +219,17 @@ export default function TransactionModal({
   } else {
     projectedStock = liveStock + Number(quantity || 0);
   }
+
+  // Bug 1: Only display Total Cost / Total Valuation for Inbound (RECEIPT), Outbound (SALE, CONSUMPTION), and Inter-DC Transfer (TRANSFER_OUT)
+  const showTotalCost = ['RECEIPT', 'SALE', 'CONSUMPTION', 'TRANSFER_OUT'].includes(type);
+
+  // Bug 3: Reactive active unit cost directly bound to user input (falling back to database default if empty/invalid)
+  const activeUnitCost = type === 'SALE'
+    ? (unitPrice !== '' && !isNaN(Number(unitPrice)) ? Number(unitPrice) : Number(dbUnitCost || unitCost || 0))
+    : (unitCost !== '' && !isNaN(Number(unitCost)) ? Number(unitCost) : Number(dbUnitCost || 0));
+
+  const activeQuantity = Number(quantity || 0);
+  const totalValuation = activeUnitCost * activeQuantity;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -177,12 +268,12 @@ export default function TransactionModal({
       if (type === 'SALE') {
         payload.quantity = Number(quantity);
         payload.reference_id = `SO-${Date.now().toString().slice(-6)}`;
-        payload.reason = `Sale to ${customerName} (${salesChannel}) @ ₹${unitPrice}/unit`;
+        payload.reason = `Sale to ${customerName} (${salesChannel}) @ ₹${activeUnitCost}/unit`;
       } else if (type === 'RECEIPT') {
         payload.quantity = Number(quantity);
         payload.batch_id = batchId || `BAT-${sku.toUpperCase()}-${cleanWh}-${Date.now().toString().slice(-4)}`;
         payload.reference_id = poNumber;
-        payload.reason = `Inbound Receipt from ${supplierName} (PO: ${poNumber}, Exp: ${expiryDate})`;
+        payload.reason = `Inbound Receipt from ${supplierName} (PO: ${poNumber}, Rate: ₹${activeUnitCost}, Exp: ${expiryDate})`;
       } else if (type === 'ADJUSTMENT') {
         payload.quantity = adjustmentDelta;
         payload.reference_id = `AUDIT-${Date.now().toString().slice(-6)}`;
@@ -193,11 +284,11 @@ export default function TransactionModal({
         payload.warehouse_id = cleanWh;
         payload.destination_warehouse_id = destinationWarehouse;
         payload.reference_id = `TRF-${sku.toUpperCase()}-${cleanWh}-${destinationWarehouse}`;
-        payload.reason = `Inter-DC Transfer from ${cleanWh} to ${destinationWarehouse}: ${transferReason} (ETA: ${transitDays}d)`;
+        payload.reason = `Inter-DC Transfer from ${cleanWh} to ${destinationWarehouse}: ${transferReason} (Rate: ₹${activeUnitCost}, ETA: ${transitDays}d)`;
       } else if (type === 'CONSUMPTION') {
         payload.quantity = Number(quantity);
         payload.reference_id = `CON-${Date.now().toString().slice(-6)}`;
-        payload.reason = `Internal Consumption by ${department}: ${consumptionReason}`;
+        payload.reason = `Internal Consumption by ${department}: ${consumptionReason} (Valuation: ₹${activeUnitCost}/unit)`;
       }
 
       const res = await api.createTransaction(payload);
@@ -251,8 +342,8 @@ export default function TransactionModal({
           </p>
         </div>
 
-        {/* Universal SKU & Warehouse Selectors */}
-        <div className="grid grid-cols-2 gap-3 p-3 bg-cream-100/60 rounded-md border border-ink-100">
+        {/* Universal SKU, Warehouse & Supplier Selectors */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-cream-100/60 rounded-md border border-ink-100">
           <div>
             <label className="text-[11px] font-semibold text-ink-700 block mb-1">Product SKU</label>
             <input
@@ -282,6 +373,30 @@ export default function TransactionModal({
                   <option value="MUM-01">Mumbai Central DC (MUM-01)</option>
                   <option value="DEL-02">Delhi NCR DC (DEL-02)</option>
                   <option value="PAT-01">Patna Regional DC (PAT-01)</option>
+                  <option value="BLR-01">Bengaluru South DC (BLR-01)</option>
+                  <option value="HYD-01">Hyderabad Regional DC (HYD-01)</option>
+                </>
+              )}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-ink-700 block mb-1">Supplier / Vendor</label>
+            <select
+              value={supplierName}
+              onChange={(e) => setSupplierName(e.target.value)}
+              className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 text-ink-800 font-medium focus:outline-none focus:border-forest-600 bg-white"
+            >
+              {suppliersList.length > 0 ? (
+                suppliersList.map((s) => (
+                  <option key={s.id || s.name} value={s.name}>{s.name}</option>
+                ))
+              ) : (
+                <>
+                  <option value="Sun Pharma Labs">Sun Pharma Labs</option>
+                  <option value="Cipla Healthcare">Cipla Healthcare</option>
+                  <option value="Dr. Reddy's Laboratories">Dr. Reddy's Laboratories</option>
+                  <option value="Lupin Pharmaceuticals">Lupin Pharmaceuticals</option>
+                  <option value="Biocon Biologics">Biocon Biologics</option>
                 </>
               )}
             </select>
@@ -334,7 +449,8 @@ export default function TransactionModal({
                 <label className="text-[11px] text-ink-600 block mb-1">Selling Price / Unit (₹)</label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.1"
+                  min="0"
                   value={unitPrice}
                   onChange={(e) => setUnitPrice(e.target.value)}
                   className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
@@ -354,14 +470,26 @@ export default function TransactionModal({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] text-ink-600 block mb-1">Supplier Name</label>
-                <input
-                  type="text"
+                <select
                   value={supplierName}
                   onChange={(e) => setSupplierName(e.target.value)}
-                  placeholder="e.g. HealthGen Pharma"
-                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white text-ink-800 font-medium focus:outline-none focus:border-forest-600"
                   required
-                />
+                >
+                  {suppliersList.length > 0 ? (
+                    suppliersList.map((s) => (
+                      <option key={s.id || s.name} value={s.name}>{s.name}</option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="Sun Pharma Labs">Sun Pharma Labs</option>
+                      <option value="Cipla Healthcare">Cipla Healthcare</option>
+                      <option value="Dr. Reddy's Laboratories">Dr. Reddy's Laboratories</option>
+                      <option value="Lupin Pharmaceuticals">Lupin Pharmaceuticals</option>
+                      <option value="Biocon Biologics">Biocon Biologics</option>
+                    </>
+                  )}
+                </select>
               </div>
               <div>
                 <label className="text-[11px] text-ink-600 block mb-1">Purchase Order / GRN Ref</label>
@@ -376,9 +504,9 @@ export default function TransactionModal({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] text-ink-600 block mb-1">Quantity (Units)</label>
+                <label className="text-[11px] text-ink-600 block mb-1">Receipt Quantity (Units)</label>
                 <input
                   type="number"
                   min="1"
@@ -389,12 +517,28 @@ export default function TransactionModal({
                 />
               </div>
               <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Unit Cost / Purchase Rate (₹)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={unitCost}
+                  onChange={(e) => setUnitCost(e.target.value)}
+                  placeholder="e.g. 25.00"
+                  className="w-full text-[12.5px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
                 <label className="text-[11px] text-ink-600 block mb-1">Batch ID (Optional)</label>
                 <input
                   type="text"
                   value={batchId}
                   onChange={(e) => setBatchId(e.target.value)}
-                  placeholder="Auto-generated"
+                  placeholder="Auto-generated if blank"
                   className="w-full text-[12px] font-mono border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
                 />
               </div>
@@ -498,9 +642,20 @@ export default function TransactionModal({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] text-ink-600 block mb-1">Rebalancing Clinical Reason</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-1">
+                <label className="text-[11px] text-ink-600 block mb-1">Unit Cost Valuation (₹)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={unitCost}
+                  onChange={(e) => setUnitCost(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                />
+              </div>
+              <div className="sm:col-span-1">
+                <label className="text-[11px] text-ink-600 block mb-1">Rebalancing Reason</label>
                 <input
                   type="text"
                   value={transferReason}
@@ -509,7 +664,7 @@ export default function TransactionModal({
                   className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
                 />
               </div>
-              <div>
+              <div className="sm:col-span-1">
                 <label className="text-[11px] text-ink-600 block mb-1">Estimated Transit Days</label>
                 <input
                   type="number"
@@ -527,7 +682,7 @@ export default function TransactionModal({
         {type === 'CONSUMPTION' && (
           <div className="space-y-3 p-3 bg-cream-200/50 rounded-md border border-ink-100">
             <span className="text-[11px] font-bold text-ink-800 uppercase block">Dispensing & Consumption Record</span>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-[11px] text-ink-600 block mb-1">Department / Clinical Unit</label>
                 <input
@@ -551,6 +706,17 @@ export default function TransactionModal({
                   required
                 />
               </div>
+              <div>
+                <label className="text-[11px] text-ink-600 block mb-1">Unit Cost Valuation (₹)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={unitCost}
+                  onChange={(e) => setUnitCost(e.target.value)}
+                  className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
+                />
+              </div>
             </div>
 
             <div>
@@ -562,6 +728,34 @@ export default function TransactionModal({
                 placeholder="e.g. Hospital inpatient antibiotic course"
                 className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
               />
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Price & Valuation Section: Conditionally shown ONLY for Inbound, Outbound, and Inter-DC Transfer */}
+        {showTotalCost && (
+          <div className="bg-forest-100/40 rounded-md p-3 border border-forest-600/20 text-[12px] space-y-1.5 animate-fadeIn">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-forest-900">Total Transaction Value</span>
+              <span className="text-[10.5px] bg-forest-200/80 text-forest-900 px-2 py-0.5 rounded font-medium">
+                {type === 'SALE' ? 'Selling Price × Quantity' : 'Unit Cost × Quantity'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-ink-700">
+              <span>{type === 'SALE' ? 'Selling Price / Unit:' : 'Active Unit Cost:'}</span>
+              <span className="font-mono font-semibold">
+                ₹{Number(activeUnitCost).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-ink-700">
+              <span>Transaction Quantity:</span>
+              <span className="font-mono font-semibold">{Number(activeQuantity).toLocaleString()} units</span>
+            </div>
+            <div className="flex items-center justify-between text-forest-900 border-t border-forest-600/20 pt-1.5 font-bold">
+              <span>Total Valuation:</span>
+              <span className="text-forest-800 font-mono text-[13.5px]">
+                ₹{Number(totalValuation).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
             </div>
           </div>
         )}

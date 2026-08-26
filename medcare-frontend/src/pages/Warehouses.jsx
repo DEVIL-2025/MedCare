@@ -245,8 +245,7 @@ export default function Warehouses() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#E2E5E1" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#68716D' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: '#68716D' }} axisLine={false} tickLine={false} domain={[0, 100]} />
-                <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid #E2E5E1', fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 12, color: '#68716D' }} />
+                <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: 11, color: '#68716D', paddingBottom: 10 }} />
                 {overviewList.map((w, idx) => {
                   const strokeColors = ["#177A5B", "#D5A72C", "#3B82F6", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316", "#6366F1", "#10B981"];
                   return (

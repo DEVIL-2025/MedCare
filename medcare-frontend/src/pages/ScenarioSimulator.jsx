@@ -118,7 +118,7 @@ export default function ScenarioSimulator() {
             <Badge tone="forest">Live DB Computation</Badge>
           </div>
 
-          <form onSubmit={(e) => { e.preventDefault(); runSimulation(); }} className="space-y-4 text-[12.5px]">
+          <div className="space-y-4 text-[12.5px]">
             <div>
               <label className="block text-ink-700 font-semibold mb-1">Scenario Title</label>
               <input
@@ -212,16 +212,7 @@ export default function ScenarioSimulator() {
                 ))}
               </select>
             </div>
-
-            <button
-              type="submit"
-              disabled={running}
-              className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-forest-700 hover:bg-forest-600 text-white rounded-md text-[13px] font-semibold transition-colors shadow-sm cursor-pointer disabled:opacity-50"
-            >
-              <Play size={15} className={running ? 'animate-spin' : ''} />
-              {running ? 'Simulating Dynamic Model...' : 'Run Scenario Simulation'}
-            </button>
-          </form>
+          </div>
         </div>
 
         {/* Right Column (2 cols): Impact Summary & Comparison */}

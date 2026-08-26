@@ -38,6 +38,20 @@ CREATE TABLE IF NOT EXISTS system_settings (
     updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT (NOW() AT TIME ZONE 'utc')
 );
 
+-- 1b. Suppliers (Vendors & Manufacturers)
+CREATE TABLE IF NOT EXISTS suppliers (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(120) NOT NULL UNIQUE,
+    contact_email VARCHAR(120),
+    contact_phone VARCHAR(50),
+    lead_time_days INTEGER DEFAULT 5,
+    category VARCHAR(150),
+    status VARCHAR(30) DEFAULT 'Active',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT (NOW() AT TIME ZONE 'utc')
+);
+CREATE INDEX IF NOT EXISTS ix_suppliers_name ON suppliers(name);
+
 -- 2. Warehouses (Multi-Tier Distribution Centers)
 CREATE TABLE IF NOT EXISTS warehouses (
     id VARCHAR(20) PRIMARY KEY,

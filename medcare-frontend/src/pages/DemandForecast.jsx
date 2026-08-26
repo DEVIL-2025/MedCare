@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, Activity, Target, Gauge, RefreshCw, AlertTriangle, Sparkles, Cpu, CheckCircle2, Award, Database, Calendar, Tag, ShieldCheck } from 'lucide-react';
+import { TrendingUp, Activity, Target, Gauge, RefreshCw, AlertTriangle, Sparkles, Cpu, CheckCircle2, Database, Calendar, Tag } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, ComposedChart, ReferenceArea } from 'recharts';
 import StatCard from '../components/ui/StatCard';
 import Badge from '../components/ui/Badge';
@@ -300,85 +300,34 @@ export default function DemandForecast() {
             </span>
           </div>
 
-          <div className="space-y-2.5 text-[12px]">
-            <div className="flex justify-between py-1 border-b border-ink-100">
-              <span className="text-ink-500">Model Architecture:</span>
-              <span className="font-semibold text-ink-800">{modelTransparency?.model_name || 'RandomForestRegressor'}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-[12px]">
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
+              <span className="text-ink-500 block text-[11px]">Model Architecture</span>
+              <span className="font-semibold text-ink-800 text-[13px]">{modelTransparency?.model_name || 'RandomForestRegressor'}</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-ink-100">
-              <span className="text-ink-500">Primary DB Table:</span>
-              <span className="font-mono font-semibold text-forest-800">{lineage.primary_table || 'demand_history'}</span>
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
+              <span className="text-ink-500 block text-[11px]">Primary DB Source</span>
+              <span className="font-mono font-semibold text-forest-800 text-[13px]">{lineage.primary_table || 'demand_history'}</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-ink-100">
-              <span className="text-ink-500">Training Samples:</span>
-              <span className="font-mono font-semibold text-ink-800">{lineage.training_samples?.toLocaleString() || '16,848'} rows</span>
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
+              <span className="text-ink-500 block text-[11px]">Training Set Volume</span>
+              <span className="font-mono font-semibold text-ink-800 text-[13px]">{lineage.training_samples?.toLocaleString() || '16,848'} rows</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-ink-100">
-              <span className="text-ink-500">Hold-Out Validation:</span>
-              <span className="font-mono font-semibold text-ink-800">{lineage.validation_samples?.toLocaleString() || '4,212'} rows (20%)</span>
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
+              <span className="text-ink-500 block text-[11px]">Hold-Out Validation</span>
+              <span className="font-mono font-semibold text-ink-800 text-[13px]">{lineage.validation_samples?.toLocaleString() || '4,212'} rows (20%)</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-ink-100">
-              <span className="text-ink-500">Validation MAE:</span>
-              <span className="font-mono font-bold text-forest-700">±{metrics.mae_units || 21.8} units</span>
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
+              <span className="text-ink-500 block text-[11px]">Validation MAE</span>
+              <span className="font-mono font-bold text-forest-700 text-[13px]">±{metrics.mae_units || 21.8} units</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-ink-100">
-              <span className="text-ink-500">Weighted Abs Error (WAPE):</span>
-              <span className="font-mono font-bold text-forest-700">{metrics.wape_pct || 7.1}%</span>
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
+              <span className="text-ink-500 block text-[11px]">Weighted Abs Error (WAPE)</span>
+              <span className="font-mono font-bold text-forest-700 text-[13px]">{metrics.wape_pct || 7.1}%</span>
             </div>
-            <div className="flex justify-between py-1">
-              <span className="text-ink-500">R² Accuracy Score:</span>
-              <span className="font-mono font-bold text-forest-700">{metrics.r2_score || 0.971}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Feature Importance Attribution */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[14.5px] font-bold text-ink-900 mb-3 flex items-center gap-1.5">
-            <Award size={16} className="text-amber-600" /> Feature Importance Ranking
-          </h3>
-          <div className="space-y-2 text-[11.5px]">
-            {modelTransparency?.feature_importances && modelTransparency.feature_importances.slice(0, 6).map((f, i) => (
-              <div key={i} className="space-y-1">
-                <div className="flex justify-between text-ink-700">
-                  <span className="font-mono font-medium">{f.feature}</span>
-                  <span className="font-semibold text-ink-900">{f.importance_pct}%</span>
-                </div>
-                <div className="w-full bg-cream-200 rounded-full h-1.5">
-                  <div
-                    className="bg-forest-600 h-1.5 rounded-full"
-                    style={{ width: `${Math.min(100, f.importance_pct * 1.3)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Retraining Cadence & Governance Triggers */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[14.5px] font-bold text-ink-900 mb-3 flex items-center gap-1.5">
-            <ShieldCheck size={16} className="text-forest-600" /> Governance & Retraining Policy
-          </h3>
-          <div className="space-y-2.5 text-[11.5px] text-ink-700">
-            <div className="p-2 rounded bg-cream-100 border border-ink-100 font-medium">
-              <span className="font-bold text-ink-900 block mb-0.5">Automated Schedule:</span>
-              Daily scheduled background calibration at 02:00 AM IST
-            </div>
-            {modelTransparency?.last_trained_formatted && (
-              <div className="p-2 rounded bg-cream-100 border border-ink-100 text-[11px] text-ink-600">
-                <span className="font-bold text-ink-900 block mb-0.5">Last Trained Time (IST):</span>
-                {modelTransparency.last_trained_formatted}
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <span className="font-bold text-ink-900 block">Active Retraining Triggers:</span>
-              {modelTransparency?.retraining_policy?.triggers?.map((trig, i) => (
-                <div key={i} className="flex items-start gap-1.5 text-[11px]">
-                  <span className="text-forest-700 font-bold">•</span>
-                  <span>{trig}</span>
-                </div>
-              ))}
+            <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100 sm:col-span-2">
+              <span className="text-ink-500 block text-[11px]">R² Accuracy Score</span>
+              <span className="font-mono font-bold text-forest-700 text-[13px]">{metrics.r2_score || 0.971}</span>
             </div>
           </div>
         </div>

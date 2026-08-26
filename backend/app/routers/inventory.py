@@ -364,9 +364,13 @@ async def delete_product(
 
 
 @router.post("/products")
-async def add_product(payload: ProductCreate, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def add_product(
+    payload: ProductCreate,
+    current_user: User = Depends(require_permission("inventory.create_product")),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
     """
-    Inserts a new product into the database and initializes inventory records across warehouses.
+    Inserts a new product into the database and initializes inventory records across warehouses (Admin Only).
     """
     existing_res = await db.execute(select(Product).where(Product.sku == payload.sku))
     if existing_res.scalars().first():

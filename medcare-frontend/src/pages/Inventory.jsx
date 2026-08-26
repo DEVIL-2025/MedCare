@@ -2,20 +2,19 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import React from 'react';
 import {
   Search, Plus, Download, Package, Boxes, AlertOctagon, PackageX,
-  ShoppingCart, ArrowRightLeft, History, ChevronDown, ChevronRight,
+  ArrowRightLeft, History, ChevronDown, ChevronRight,
   Layers, Trash2, HelpCircle, Calendar, Sparkles, Clock, X
 } from 'lucide-react';
 import StatCard from '../components/ui/StatCard';
 import Badge from '../components/ui/Badge';
 import LoadingState from '../components/ui/LoadingState';
 import ErrorState from '../components/ui/ErrorState';
-import EmptyState from '../components/ui/EmptyState';
 import TransactionModal from '../components/transactions/TransactionModal';
 import AddProductModal from '../components/inventory/AddProductModal';
-import RecordSaleModal from '../components/inventory/RecordSaleModal';
 import { riskTone, riskLabel } from '../data/riskTone';
 import { api } from '../api/client';
 import { useControlTower } from '../context/ControlTowerContext';
+import { useAuth } from '../context/AuthContext';
 import { formatDate, formatDateTime } from '../utils/dateUtils';
 
 const quickFilters = [
@@ -28,6 +27,9 @@ const quickFilters = [
 
 export default function Inventory() {
   const { selectedWarehouse, setSelectedWarehouse, refreshKey, triggerRefresh } = useControlTower();
+  const { isAdmin, hasPermission } = useAuth();
+  const canAddProduct = isAdmin || hasPermission('inventory.create_product');
+
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -49,7 +51,6 @@ export default function Inventory() {
   // Modals State
   const [txModalOpen, setTxModalOpen] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
-  const [recordSaleOpen, setRecordSaleOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   const loadInventory = useCallback(async () => {
@@ -135,20 +136,6 @@ export default function Inventory() {
     setTxModalOpen(true);
   }
 
-  function handleOpenSaleModal(prod = null) {
-    if (prod) {
-      const isAggregateWh = !prod.warehouse || ['all', 'all warehouses', 'network', 'network rollup'].includes(String(prod.warehouse).toLowerCase());
-      const normalizedWh = isAggregateWh
-        ? (prod.warehouseBreakdown?.[0]?.warehouseId || (selectedWarehouse !== 'All' ? selectedWarehouse : 'MUM-01'))
-        : prod.warehouse;
-      setSelectedProduct({ ...prod, warehouse: normalizedWh, warehouse_id: normalizedWh });
-    } else {
-      const defaultWh = selectedWarehouse !== 'All' ? selectedWarehouse : 'MUM-01';
-      setSelectedProduct({ warehouse: defaultWh, warehouse_id: defaultWh });
-    }
-    setRecordSaleOpen(true);
-  }
-
   function toggleSkuExpand(sku) {
     setExpandedSkus((prev) => ({ ...prev, [sku]: !prev[sku] }));
   }
@@ -205,25 +192,20 @@ export default function Inventory() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => handleOpenSaleModal()}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-forest-700 text-white rounded-md text-[12.5px] font-semibold hover:bg-forest-600 transition-colors shadow-xs cursor-pointer"
-            title="Record Outbound Sale"
-          >
-            <ShoppingCart size={14} /> Record Sale
-          </button>
-          <button
             onClick={() => handleOpenTxModal()}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-forest-800 text-white rounded-md text-[12.5px] font-semibold hover:bg-forest-700 transition-colors shadow-xs cursor-pointer"
-            title="Record Stock Receipt, Adjustment, or Inter-DC Transfer"
+            title="Record Stock Receipt, Sale, Adjustment, or Inter-DC Transfer"
           >
             <Plus size={14} /> Record Stock Tx
           </button>
-          <button
-            onClick={() => setAddProductOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-ink-200 text-ink-700 rounded-md text-[12.5px] font-medium hover:bg-cream-200 transition-colors cursor-pointer"
-          >
-            <Package size={14} /> Add Product
-          </button>
+          {canAddProduct && (
+            <button
+              onClick={() => setAddProductOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-ink-200 text-ink-700 rounded-md text-[12.5px] font-medium hover:bg-cream-200 transition-colors cursor-pointer"
+            >
+              <Package size={14} /> Add Product
+            </button>
+          )}
           <button
             onClick={exportCSV}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-ink-200 text-ink-700 rounded-md text-[12.5px] font-medium hover:bg-cream-200 transition-colors cursor-pointer"
@@ -641,7 +623,7 @@ export default function Inventory() {
                   const fullReason = tx.reason || tx.referenceId || '-';
                   const isLongReason = fullReason.length > 35;
 
-                  const formattedTimeStr = formatDateTime(tx.timestamp || tx.formattedTime);
+                  const formattedTimeStr = tx.formattedTime || formatDateTime(tx.timestamp);
 
                   return (
                     <tr key={tx.id} className="hover:bg-cream-100/50 transition-colors">
@@ -711,26 +693,12 @@ export default function Inventory() {
         />
       )}
 
-      {/* Add Product Modal */}
-      {addProductOpen && (
+      {/* Add Product Modal (Admin Only) */}
+      {canAddProduct && addProductOpen && (
         <AddProductModal
           open={addProductOpen}
           onClose={() => setAddProductOpen(false)}
           onProductAdded={() => {
-            triggerRefresh();
-            loadInventory();
-            loadTransactions();
-          }}
-        />
-      )}
-
-      {/* Record Sale Modal */}
-      {recordSaleOpen && (
-        <RecordSaleModal
-          open={recordSaleOpen}
-          onClose={() => setRecordSaleOpen(false)}
-          defaultItem={selectedProduct}
-          onSaleRecorded={() => {
             triggerRefresh();
             loadInventory();
             loadTransactions();

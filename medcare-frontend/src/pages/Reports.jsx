@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { DollarSign, Boxes, Truck, AlertTriangle, ShieldAlert, Download, Sparkles, TrendingUp, Award, Filter, RefreshCw } from 'lucide-react';
+import { DollarSign, Boxes, Truck, AlertTriangle, ShieldAlert, Download, Sparkles, TrendingUp, Award, Filter, RefreshCw, BarChart3, CheckCircle2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/ui/StatCard';
 import Badge from '../components/ui/Badge';
@@ -44,7 +44,7 @@ export default function Reports() {
     setWarehouseFilter(selectedWarehouse);
   }, [selectedWarehouse]);
 
-  // Load categories and warehouses
+  // Load categories and warehouses metadata
   useEffect(() => {
     async function loadMeta() {
       try {
@@ -90,28 +90,125 @@ export default function Reports() {
 
   function exportReportCSV() {
     if (!data) return;
-    const rows = [
-      ['Report Parameter', 'Applied Setting'],
-      ['Report Type', reportType],
-      ['Warehouse Scope', warehouseFilter],
-      ['Category Filter', categoryFilter],
-      ['Time Period Window', timePeriod],
-      ['Generation Timestamp (IST)', formatDateTime(data?.server_time || new Date())],
-      [''],
-      ['Metric', 'Value'],
-      ['Total Inventory Value', data.kpis?.total_inventory_value || '₹0 Cr'],
-      ['Consumption in Period', data.kpis?.total_consumption || '0 units'],
-      ['Pending Replenishment Value', data.kpis?.replenishment_value || '₹0 Cr'],
-      ['Expiry Value at Risk', data.kpis?.expiry_value_at_risk || '₹0 Cr'],
-      ['Stockout Incidents Logged', data.kpis?.stockout_incidents || 0],
-      ['Annualized Cost Savings', metricsData?.business_impact?.total_savings_annual_inr || '₹2.95 Cr'],
-      ['Estimated ROI Multiple', metricsData?.business_impact?.roi_multiple || '6.8x'],
-    ];
-    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map(e => e.join(',')).join('\n');
+
+    function csvCell(val) {
+      if (val === null || val === undefined) return '""';
+      const s = String(val).replace(/"/g, '""');
+      return `"${s}"`;
+    }
+
+    const lines = [];
+
+    // 1. Header Metadata
+    lines.push([csvCell('MEDCARE PHARMA SCM CONTROL TOWER - EXECUTIVE SUPPLY CHAIN & FINANCIAL ROI REPORT')]);
+    lines.push([csvCell(`Report Generated (IST): ${data.formatted_server_time || formatDateTime(new Date())}`)]);
+    lines.push([csvCell(`Report Scope: ${warehouseFilter === 'All' ? 'All Distribution Centers (Network Rollup)' : warehouseFilter}`)]);
+    lines.push([csvCell(`Therapeutic Category: ${categoryFilter}`)]);
+    lines.push([csvCell(`Analysis Time Window: ${timePeriod}`)]);
+    lines.push([csvCell(`Module Filter: ${reportType}`)]);
+    lines.push([]);
+
+    // 2. Executive KPI Summary
+    lines.push([csvCell('=== 1. EXECUTIVE SUPPLY CHAIN KPI SUMMARY ===')]);
+    lines.push([csvCell('Metric Name'), csvCell('Value'), csvCell('Scope / Notes')]);
+    lines.push([csvCell('Total Inventory Value'), csvCell(kpis.total_inventory_value || '₹0'), csvCell(`Live valuation in ${warehouseFilter}`)]);
+    lines.push([csvCell('Total Physical Units in Stock'), csvCell(kpis.total_inventory_units?.toLocaleString() || '0 units'), csvCell('Aggregate batch stock units')]);
+    lines.push([csvCell('Consumption in Period'), csvCell(kpis.total_consumption || '0 units'), csvCell(`Outbound demand in ${timePeriod}`)]);
+    lines.push([csvCell('Projected Replenishment Requirement'), csvCell(kpis.replenishment_value || '₹0'), csvCell('Pending purchase orders & replenishment demand')]);
+    lines.push([csvCell('Expiry Value at Risk (< 90 Days)'), csvCell(kpis.expiry_value_at_risk || '₹0'), csvCell('Batches requiring urgent FEFO liquidation')]);
+    lines.push([csvCell('Distribution Center Stockout Incidents'), csvCell(kpis.stockout_incidents || 0), csvCell('Active shortage/stockout alerts logged')]);
+    lines.push([csvCell('Annualized Cost Savings'), csvCell(business_impact.total_savings_annual_inr || '₹2.95 Cr'), csvCell('Avoided stockouts and expired write-offs')]);
+    lines.push([csvCell('Estimated ROI Multiple'), csvCell(business_impact.roi_multiple || '6.8x'), csvCell('Annualized return multiple')]);
+    lines.push([]);
+
+    // 3. Historical Inventory Valuation Trend
+    lines.push([csvCell('=== 2. DAILY INVENTORY VALUATION TREND ===')]);
+    lines.push([csvCell('Date'), csvCell('Total Valuation (₹ Lakhs)'), csvCell('Healthy Stock (₹ Lakhs)'), csvCell('Near-Expiry at Risk (₹ Lakhs)')]);
+    if (inventory_value_trend.length > 0) {
+      inventory_value_trend.forEach((row) => {
+        lines.push([
+          csvCell(row.date),
+          csvCell(row.total),
+          csvCell(row.usable),
+          csvCell(row.atRisk)
+        ]);
+      });
+    } else {
+      lines.push([csvCell('No trend records found for selected window')]);
+    }
+    lines.push([]);
+
+    // 4. FEFO Batch Expiry Aging Breakdown
+    lines.push([csvCell('=== 3. FEFO BATCH EXPIRY AGING BREAKDOWN ===')]);
+    lines.push([csvCell('Aging Interval Bracket'), csvCell('Quantity in Stock (Units)'), csvCell('Proportion (%)'), csvCell('Valuation (₹ Lakhs)'), csvCell('Valuation (₹ Cr)')]);
+    if (aging_summary.length > 0) {
+      aging_summary.forEach((item) => {
+        lines.push([
+          csvCell(item.bucket),
+          csvCell(item.units?.toLocaleString()),
+          csvCell(item.pct_display || `${item.pct}%`),
+          csvCell(item.value_lakh ?? (item.value_cr ? (item.value_cr * 100).toFixed(2) : '0')),
+          csvCell(item.value_cr ?? '0')
+        ]);
+      });
+    } else {
+      lines.push([csvCell('No aging data available')]);
+    }
+    lines.push([]);
+
+    // 5. Therapeutic Category Consumption
+    lines.push([csvCell('=== 4. THERAPEUTIC CATEGORY CONSUMPTION (WINDOW) ===')]);
+    lines.push([csvCell('Therapeutic Category'), csvCell('Consumption Value (₹ Lakhs)'), csvCell('Formatted Display')]);
+    if (top_categories_by_consumption.length > 0) {
+      top_categories_by_consumption.forEach((cat) => {
+        lines.push([
+          csvCell(cat.name),
+          csvCell(cat.value),
+          csvCell(cat.display)
+        ]);
+      });
+    } else {
+      lines.push([csvCell('No category consumption records found')]);
+    }
+    lines.push([]);
+
+    // 6. Distribution Center Stockout Incidents
+    lines.push([csvCell('=== 5. DISTRIBUTION CENTER STOCKOUT INCIDENTS ===')]);
+    lines.push([csvCell('Warehouse / DC ID'), csvCell('Warehouse Name'), csvCell('Active Stockout / Shortage Alerts')]);
+    if (stockout_by_warehouse.length > 0) {
+      stockout_by_warehouse.forEach((wh) => {
+        lines.push([
+          csvCell(wh.warehouse),
+          csvCell(wh.name || wh.warehouse),
+          csvCell(wh.count)
+        ]);
+      });
+    } else {
+      lines.push([csvCell('No active stockouts logged across network')]);
+    }
+    lines.push([]);
+
+    // 7. Business Impact & ROI Transformation
+    if (business_impact.before_vs_after && business_impact.before_vs_after.length > 0) {
+      lines.push([csvCell('=== 6. SCM CONTROL TOWER BUSINESS IMPACT & ROI TRANSFORMATION ===')]);
+      lines.push([csvCell('Performance Metric'), csvCell('Traditional Baseline'), csvCell('MedCare Control Tower'), csvCell('Measured Business Impact')]);
+      business_impact.before_vs_after.forEach((row) => {
+        lines.push([
+          csvCell(row.metric),
+          csvCell(row.baseline),
+          csvCell(row.control_tower),
+          csvCell(row.improvement)
+        ]);
+      });
+      lines.push([]);
+    }
+
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + lines.map((l) => l.join(',')).join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `medcare_scm_report_${warehouseFilter}_${timePeriod.replace(/\s+/g, '_')}.csv`);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    link.setAttribute('download', `Executive_Supply_Chain_Report_${dateStr}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -155,6 +252,7 @@ export default function Reports() {
         <button
           onClick={exportReportCSV}
           className="flex items-center gap-1.5 px-3.5 py-1.5 bg-forest-700 hover:bg-forest-600 text-white rounded-md text-[12px] font-semibold transition-colors shadow-sm cursor-pointer"
+          title="Download complete structured CSV report"
         >
           <Download size={14} /> Download Executive Report (CSV)
         </button>
@@ -231,10 +329,10 @@ export default function Reports() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={DollarSign} tone="forest" label="Total Inventory Value" value={kpis.total_inventory_value || '₹0 Cr'} delta={`In scope (${warehouseFilter})`} />
+        <StatCard icon={DollarSign} tone="forest" label="Total Inventory Value" value={kpis.total_inventory_value || '₹0'} delta={`In scope (${warehouseFilter})`} />
         <StatCard icon={Boxes} tone="sage" label="Consumption in Period" value={kpis.total_consumption || '0 units'} delta={timePeriod} />
-        <StatCard icon={Truck} tone="gold" label="Projected Replenishment" value={kpis.replenishment_value || '₹0 Cr'} delta="Pending PO demand" />
-        <StatCard icon={ShieldAlert} tone="brick" label="Expiry Value at Risk" value={kpis.expiry_value_at_risk || '₹0 Cr'} delta="Batches < 90 days" deltaPositive={false} />
+        <StatCard icon={Truck} tone="gold" label="Projected Replenishment" value={kpis.replenishment_value || '₹0'} delta="Pending PO demand" />
+        <StatCard icon={ShieldAlert} tone="brick" label="Expiry Value at Risk" value={kpis.expiry_value_at_risk || '₹0'} delta="Batches < 90 days" deltaPositive={false} />
       </div>
 
       {/* Business Impact ROI Comparison Table */}
@@ -316,12 +414,14 @@ export default function Reports() {
                   <div key={i} className="space-y-1">
                     <div className="flex justify-between text-ink-700">
                       <span className="font-semibold text-ink-900">{item.bucket}</span>
-                      <span className="font-bold text-ink-800">{Number(item.units || 0).toLocaleString()} units ({item.pct}%)</span>
+                      <span className="font-bold text-ink-800">
+                        {Number(item.units || 0).toLocaleString()} units ({item.pct_display || `${item.pct}%`})
+                      </span>
                     </div>
                     <div className="w-full bg-cream-200 rounded-full h-2">
                       <div
                         className="h-2 rounded-full"
-                        style={{ width: `${item.pct}%`, backgroundColor: item.color || '#177A5B' }}
+                        style={{ width: `${Math.max(item.units > 0 ? 1 : 0, item.pct)}%`, backgroundColor: item.color || '#177A5B' }}
                       />
                     </div>
                   </div>
@@ -373,9 +473,12 @@ export default function Reports() {
                 {stockout_by_warehouse.length > 0 ? (
                   stockout_by_warehouse.map((wh, i) => (
                     <div key={i} className="flex items-center justify-between p-2.5 rounded bg-cream-100/60 border border-ink-100">
-                      <div className="font-semibold text-ink-900">{wh.warehouse}</div>
+                      <div>
+                        <div className="font-semibold text-ink-900">{wh.name || wh.warehouse} ({wh.warehouse})</div>
+                        <div className="text-[11px] text-ink-500">{wh.count > 0 ? 'Active alerts logged' : 'Optimal buffer stock maintained'}</div>
+                      </div>
                       <Badge tone={wh.count > 10 ? 'critical' : wh.count > 0 ? 'warning' : 'good'}>
-                        {wh.count} Stockout Alerts
+                        {wh.count > 0 ? `${wh.count} Stockout Alerts` : 'Zero Stockouts'}
                       </Badge>
                     </div>
                   ))

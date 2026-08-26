@@ -90,8 +90,8 @@ class ReplenishmentEngine:
                     existing_rec.reason_impact = f"Resolved: Stock restored to {inv.current_stock:,} units ({round(inv.current_stock / daily_sensed, 1)} days of cover)."
                 continue
 
-            raw_qty = max(net_shortfall, prod.moq)
-            recommended_qty = int((raw_qty + 499) // 500 * 500)
+            # Recommended Quantity = ML Forecasted Demand - Current Stock
+            recommended_qty = max(0, int(round(forecast_30d - inv.current_stock)))
 
             doc = inv.available_stock / daily_sensed
             if doc <= lead_time or inv.current_stock <= 0:

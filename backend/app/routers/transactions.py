@@ -17,7 +17,7 @@ from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
 from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.services.notification_service import NotificationService
 from backend.app.routers.ws import ws_manager
-from backend.app.utils.timezone import get_utc_now, format_ist_datetime
+from backend.app.utils.timezone import get_utc_now, format_ist_datetime, to_ist_iso, get_now_ist
 
 router = APIRouter(prefix="/api/transactions", tags=["Transactions"])
 
@@ -112,7 +112,7 @@ async def create_transaction(
                 "from": src_wh,
                 "to": dest_wh,
                 "quantity": payload.quantity,
-                "timestamp": tx_out.timestamp.isoformat()
+                "timestamp": to_ist_iso(tx_out.timestamp)
             })
             await ws_manager.broadcast({
                 "event": "INVENTORY_TRANSACTION",
@@ -125,7 +125,7 @@ async def create_transaction(
                 "status": inv_src.status,
                 "risk_level": inv_src.risk_level,
                 "days_of_cover": inv_src.days_of_cover,
-                "timestamp": tx_out.timestamp.isoformat()
+                "timestamp": to_ist_iso(tx_out.timestamp)
             })
             await ws_manager.broadcast({
                 "event": "INVENTORY_TRANSACTION",
@@ -138,11 +138,11 @@ async def create_transaction(
                 "status": inv_dst.status,
                 "risk_level": inv_dst.risk_level,
                 "days_of_cover": inv_dst.days_of_cover,
-                "timestamp": tx_in.timestamp.isoformat()
+                "timestamp": to_ist_iso(tx_in.timestamp)
             })
             await ws_manager.broadcast({
                 "event": "REPLENISHMENT_UPDATED",
-                "timestamp": now_utc.isoformat()
+                "timestamp": get_now_ist().isoformat()
             })
 
             return {
@@ -209,12 +209,12 @@ async def create_transaction(
             "risk_level": inv.risk_level,
             "days_of_cover": inv.days_of_cover,
             "alert_created": alert_created.id if alert_created else None,
-            "timestamp": tx.timestamp.isoformat()
+            "timestamp": to_ist_iso(tx.timestamp)
         }
         await ws_manager.broadcast(event_payload)
         await ws_manager.broadcast({
             "event": "REPLENISHMENT_UPDATED",
-            "timestamp": now_utc.isoformat()
+            "timestamp": get_now_ist().isoformat()
         })
 
         return {
@@ -301,7 +301,7 @@ async def get_transactions(
             "referenceId": tx.reference_id or "-",
             "reason": tx.reason or "-",
             "performedBy": tx.performed_by,
-            "timestamp": tx.timestamp.isoformat() if hasattr(tx.timestamp, "isoformat") else str(tx.timestamp),
+            "timestamp": to_ist_iso(tx.timestamp),
             "formattedTime": format_ist_datetime(tx.timestamp)
         }
         for tx, prod in records

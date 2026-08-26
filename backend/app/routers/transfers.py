@@ -137,6 +137,20 @@ async def execute_transfer(id: str, db: AsyncSession = Depends(get_db)):
 
     except Exception as e:
         await db.rollback()
+        # Clean up stale recommended transfer if stock dropped concurrently
+        try:
+            stale_trf = (await db.execute(select(InventoryTransfer).where(InventoryTransfer.id == id))).scalars().first()
+            if stale_trf and stale_trf.status == "RECOMMENDED":
+                await db.delete(stale_trf)
+                await NetworkBalancingEngine.identify_network_transfers(db)
+                await ReplenishmentEngine.sync_recommendations(db)
+                await db.commit()
+                await ws_manager.broadcast({
+                    "event": "REPLENISHMENT_UPDATED",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+        except Exception:
+            pass
         raise HTTPException(status_code=400, detail=f"Transfer execution failed: {str(e)}")
 
 

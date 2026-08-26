@@ -7,6 +7,14 @@ import { useState, useEffect } from 'react';
 export const IST_TIMEZONE = 'Asia/Kolkata';
 
 /**
+ * Clean custom configuration options before passing to Intl.DateTimeFormat.
+ */
+function sanitizeIntlOptions(options = {}) {
+  const { hideZone, fallback, includeSeconds, ...intlOptions } = options;
+  return intlOptions;
+}
+
+/**
  * Parses any date/time input (ISO string, epoch timestamp, Date object) safely.
  */
 export function parseDate(dateInput) {
@@ -14,13 +22,29 @@ export function parseDate(dateInput) {
   if (dateInput instanceof Date) return isNaN(dateInput.getTime()) ? null : dateInput;
   if (typeof dateInput === 'number') return new Date(dateInput);
   if (typeof dateInput === 'string') {
-    // If it is a date-only string like YYYY-MM-DD, parse as local calendar date
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-      const [y, m, d] = dateInput.split('-').map(Number);
-      return new Date(y, m - 1, d);
+    const s = dateInput.trim();
+    if (!s) return null;
+
+    // If it is a date-only string like YYYY-MM-DD, parse as UTC midnight to avoid local timezone shifts
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, m, d] = s.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d));
     }
-    // Parse ISO string
-    const d = new Date(dateInput);
+
+    // If string already has a timezone indicator (Z, +05:30, -04:00, etc.)
+    if (/([+-]\d{2}:\d{2}|Z)$/i.test(s)) {
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    // If string is an ISO format with 'T' but no timezone offset, assume UTC timestamp from server
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
+      const d = new Date(s + 'Z');
+      if (!isNaN(d.getTime())) return d;
+    }
+
+    // Standard date parsing fallback
+    const d = new Date(s);
     return isNaN(d.getTime()) ? null : d;
   }
   return null;
@@ -28,11 +52,15 @@ export function parseDate(dateInput) {
 
 /**
  * Formats a date + time in Asia/Kolkata (IST) timezone.
- * Example: "25 Aug 2026, 10:42 PM IST"
+ * Example: "26 Aug 2026, 06:25 PM IST"
  */
 export function formatDateTime(dateInput, options = {}) {
+  if (typeof dateInput === 'string' && dateInput.includes('IST')) {
+    return options.hideZone ? dateInput.replace(/\s+IST$/i, '') : dateInput;
+  }
+
   const d = parseDate(dateInput);
-  if (!d) return options.fallback || '-';
+  if (!d) return options.fallback || (typeof dateInput === 'string' ? dateInput : '-');
 
   const defaultOptions = {
     timeZone: IST_TIMEZONE,
@@ -46,7 +74,10 @@ export function formatDateTime(dateInput, options = {}) {
   };
 
   try {
-    const formatted = new Intl.DateTimeFormat('en-IN', { ...defaultOptions, ...options }).format(d);
+    const formatted = new Intl.DateTimeFormat(
+      'en-IN',
+      { ...defaultOptions, ...sanitizeIntlOptions(options) }
+    ).format(d);
     return options.hideZone ? formatted : `${formatted} IST`;
   } catch (err) {
     console.warn('formatDateTime error:', err);
@@ -56,11 +87,11 @@ export function formatDateTime(dateInput, options = {}) {
 
 /**
  * Formats a date only in Asia/Kolkata (IST) timezone.
- * Example: "25 Aug 2026"
+ * Example: "26 Aug 2026"
  */
 export function formatDate(dateInput, options = {}) {
   const d = parseDate(dateInput);
-  if (!d) return options.fallback || '-';
+  if (!d) return options.fallback || (typeof dateInput === 'string' ? dateInput : '-');
 
   const defaultOptions = {
     timeZone: IST_TIMEZONE,
@@ -70,7 +101,10 @@ export function formatDate(dateInput, options = {}) {
   };
 
   try {
-    return new Intl.DateTimeFormat('en-IN', { ...defaultOptions, ...options }).format(d);
+    return new Intl.DateTimeFormat(
+      'en-IN',
+      { ...defaultOptions, ...sanitizeIntlOptions(options) }
+    ).format(d);
   } catch (err) {
     return d.toLocaleDateString('en-IN', { timeZone: IST_TIMEZONE });
   }
@@ -82,7 +116,7 @@ export function formatDate(dateInput, options = {}) {
  */
 export function formatTime(dateInput, options = {}) {
   const d = parseDate(dateInput);
-  if (!d) return options.fallback || '-';
+  if (!d) return options.fallback || (typeof dateInput === 'string' ? dateInput : '-');
 
   const defaultOptions = {
     timeZone: IST_TIMEZONE,
@@ -93,7 +127,10 @@ export function formatTime(dateInput, options = {}) {
   };
 
   try {
-    const formatted = new Intl.DateTimeFormat('en-IN', { ...defaultOptions, ...options }).format(d);
+    const formatted = new Intl.DateTimeFormat(
+      'en-IN',
+      { ...defaultOptions, ...sanitizeIntlOptions(options) }
+    ).format(d);
     return options.hideZone ? formatted : `${formatted} IST`;
   } catch (err) {
     return d.toLocaleTimeString('en-IN', { timeZone: IST_TIMEZONE });
@@ -127,14 +164,18 @@ export function formatRelativeTime(dateInput) {
 }
 
 /**
- * Calculates remaining days from now to target date in IST.
+ * Calculates remaining days from today to target date in calendar days.
  */
 export function getDaysToExpiry(expiryDateInput) {
   const d = parseDate(expiryDateInput);
   if (!d) return 999;
+  
   const now = new Date();
-  const diffTime = d.getTime() - now.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  
+  const diffTime = targetDate.getTime() - startOfToday.getTime();
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
 }
 
 /**

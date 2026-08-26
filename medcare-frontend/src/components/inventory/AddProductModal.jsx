@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Package, Plus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { api } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 
 const PHARMA_CATEGORIES = [
   'Analgesics',
@@ -17,6 +18,9 @@ const PHARMA_CATEGORIES = [
 ];
 
 export default function AddProductModal({ open, onClose, onProductAdded }) {
+  const { isAdmin, hasPermission } = useAuth();
+  const canAdd = isAdmin || hasPermission('inventory.create_product');
+
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState(PHARMA_CATEGORIES[0]);
@@ -83,6 +87,8 @@ export default function AddProductModal({ open, onClose, onProductAdded }) {
       setLoading(false);
     }
   }
+
+  if (!canAdd) return null;
 
   return (
     <Modal open={open} onClose={onClose} title="Register New Pharmaceutical SKU in Catalog">

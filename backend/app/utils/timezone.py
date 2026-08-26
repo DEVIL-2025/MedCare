@@ -39,6 +39,23 @@ def to_ist(dt: Optional[Union[datetime, date, str]]) -> Optional[datetime]:
         return dt.astimezone(IST)
     return None
 
+def to_ist_iso(dt: Optional[Union[datetime, date, str]]) -> Optional[str]:
+    """Converts any datetime/date to an ISO string with explicit IST (+05:30) offset."""
+    if dt is None:
+        return None
+    ist_dt = to_ist(dt)
+    return ist_dt.isoformat() if ist_dt else None
+
+def to_utc_iso(dt: Optional[Union[datetime, date, str]]) -> Optional[str]:
+    """Converts any datetime to an ISO string with explicit UTC (Z) suffix."""
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return str(dt)
+
 def format_ist_datetime(
     dt: Optional[Union[datetime, date, str]],
     fmt: str = "%d %b %Y, %I:%M:%S %p IST"

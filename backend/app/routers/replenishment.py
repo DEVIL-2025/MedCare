@@ -339,6 +339,22 @@ async def get_replenishment_overview(
         "active_demands": active_demands,
         "completed_demands": completed_demands,
         "approved_orders": approved_orders,
+        "fefo_transfer_history": [
+            {
+                "id": t.id,
+                "sku": t.sku,
+                "product": p.name,
+                "from": t.source_warehouse_id,
+                "to": t.destination_warehouse_id,
+                "quantity": t.quantity,
+                "batchId": t.batch_id or "BAT-FEFO-AUTO",
+                "savings": f"₹{round(t.estimated_savings_inr / 100000.0, 2)} L",
+                "date": format_ist_datetime(t.received_at or t.dispatched_at or t.created_at),
+                "status": t.status.capitalize() if t.status else "Executed",
+                "reason": t.reason or "Inter-DC FEFO balancing"
+            }
+            for t, p in trf_records if t.status in ["COMPLETED", "Completed", "EXECUTED", "Executed", "APPROVED", "Approved", "DISPATCHED", "Dispatched"]
+        ],
         "purchase_orders": purchase_orders
     }
 

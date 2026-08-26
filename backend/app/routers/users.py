@@ -11,7 +11,7 @@ from backend.app.models.auth import User, Role, Permission, AuditLog
 from backend.app.services.auth_service import AuthService
 from backend.app.services.audit_service import AuditService
 from backend.app.dependencies.auth import require_admin, get_current_user
-from backend.app.utils.timezone import get_utc_now, format_ist_datetime
+from backend.app.utils.timezone import get_utc_now, format_ist_datetime, to_ist_iso
 
 router = APIRouter(tags=["User Management"])
 
@@ -66,9 +66,9 @@ async def list_users(
             "role_name": u.role.name if u.role else u.role_id,
             "is_active": u.is_active,
             "must_change_password": u.must_change_password,
-            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            "last_login_at": to_ist_iso(u.last_login_at),
             "last_login_formatted": format_ist_datetime(u.last_login_at) if u.last_login_at else "Never",
-            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "created_at": to_ist_iso(u.created_at),
             "created_at_formatted": format_ist_datetime(u.created_at),
             "created_by": u.created_by
         }
@@ -369,7 +369,7 @@ async def list_audit_logs(
                 "ip_address": l.ip_address,
                 "timestamp": format_ist_datetime(l.created_at),
                 "formattedTime": format_ist_datetime(l.created_at),
-                "created_at": l.created_at.isoformat() if l.created_at else None
+                "created_at": to_ist_iso(l.created_at)
             }
             for l in logs
         ]

@@ -59,7 +59,10 @@ async def test_add_and_delete_product_cascade_db():
     from backend.app.schemas.inventory import ProductCreate
     from backend.app.models.product import Product
     from backend.app.models.inventory import Inventory
+    from backend.app.models.auth import User
     from sqlalchemy import select
+
+    admin_user = User(id="USR-ADMIN-TEST", role_id="ADMIN", is_active=True)
 
     async with AsyncSessionLocal() as session:
         # Create test product
@@ -77,7 +80,7 @@ async def test_add_and_delete_product_cascade_db():
             initial_stock=100,
             initial_warehouse_id="MUM-01"
         )
-        res_add = await add_product(payload=create_payload, db=session)
+        res_add = await add_product(payload=create_payload, current_user=admin_user, db=session)
         assert res_add["success"] is True
 
         # Verify product exists in database
@@ -89,7 +92,7 @@ async def test_add_and_delete_product_cascade_db():
         assert len(inv_check.scalars().all()) > 0
 
         # Delete product
-        res_del = await delete_product(sku="TEST-PROD-999", db=session)
+        res_del = await delete_product(sku="TEST-PROD-999", current_user=admin_user, db=session)
         assert res_del["success"] is True
 
         # Verify product is completely gone from products table in database
@@ -99,6 +102,25 @@ async def test_add_and_delete_product_cascade_db():
         # Verify inventory records are completely gone
         final_inv = await session.execute(select(Inventory).where(Inventory.sku == "TEST-PROD-999"))
         assert len(final_inv.scalars().all()) == 0
+
+
+@pytest.mark.asyncio
+async def test_manager_forbidden_to_create_product():
+    from fastapi import HTTPException
+    from backend.app.dependencies.auth import require_permission
+    from backend.app.models.auth import User
+
+    manager_user = User(id="USR-MANAGER-TEST", role_id="MANAGER", is_active=True)
+    setattr(manager_user, "permission_codes", {"inventory.view", "inventory.record_stock_transaction"})
+
+    checker = require_permission("inventory.create_product")
+
+    # Manager role lacks inventory.create_product -> must raise 403 HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        await checker(current_user=manager_user)
+
+    assert exc_info.value.status_code == 403
+    assert "inventory.create_product" in exc_info.value.detail
 
 
 @pytest.mark.asyncio

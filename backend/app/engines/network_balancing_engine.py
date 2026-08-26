@@ -82,16 +82,16 @@ class NetworkBalancingEngine:
                 daily_rate = max(1.0, float(f_data.get("sensed_daily", 50.0)))
                 doc = inv.available_stock / daily_rate
 
-                if doc <= 14.0 or inv.current_stock < inv.reorder_point or inv.status in ["CRITICAL", "LOW_STOCK", "OUT_OF_STOCK"]:
+                if inv.status in ["CRITICAL", "LOW_STOCK", "OUT_OF_STOCK"] or inv.current_stock < inv.reorder_point or doc <= 6.0:
                     shortage_nodes.append({
                         "warehouse_id": inv.warehouse_id,
                         "current_stock": inv.current_stock,
                         "available_stock": inv.available_stock,
                         "daily_rate": daily_rate,
                         "doc": doc,
-                        "deficit": max(prod.moq, int(inv.reorder_point - inv.current_stock))
+                        "deficit": max(prod.moq * 2 if prod.moq <= 100 else prod.moq, int(daily_rate * 4.0), int(inv.reorder_point * 1.5 - inv.current_stock))
                     })
-                elif doc >= 20.0 or inv.current_stock >= inv.reorder_point * 1.1:
+                elif inv.status == "OVERSTOCK" or doc >= 12.0 or inv.current_stock >= inv.reorder_point * 1.5:
                     batches = batches_by_sku_wh.get(f"{sku}_{inv.warehouse_id}", [])
                     near_expiry_qty = sum(
                         b.quantity for b in batches if (b.expiry_date - today).days <= settings.EXPIRY_AT_RISK_DAYS
@@ -125,9 +125,14 @@ class NetworkBalancingEngine:
                         chosen_batch = e_node["batches"][0] if e_node["batches"] else None
                         batch_id = chosen_batch.id if chosen_batch else None
                         
-                        transfer_qty = min(available_transfer, 5000)
-                        # Round to nearest 50 or moq
-                        transfer_qty = max(prod.moq, int((transfer_qty + 49) // 50 * 50))
+                        transfer_qty = min(available_transfer, e_node["available_stock"], 5000)
+                        # Round to nearest 50 or moq, capped strictly by live available stock
+                        transfer_qty = max(min(prod.moq, e_node["available_stock"]), int((transfer_qty + 49) // 50 * 50))
+                        transfer_qty = min(transfer_qty, e_node["available_stock"])
+
+                        if transfer_qty < min(50, prod.moq):
+                            continue
+
                         savings = round(transfer_qty * prod.unit_cost * 0.85, 2)  # Avoided procurement + writeoff
 
                         days_to_exp = (chosen_batch.expiry_date - today).days if chosen_batch else 60
@@ -147,8 +152,8 @@ class NetworkBalancingEngine:
                                 existing_trf.available_at_source = e_node["available_stock"]
                                 existing_trf.estimated_savings_inr = savings
                                 existing_trf.reason = reason
-                                transfers.append(existing_trf)
-                                active_trf_ids.add(trf_id)
+                            transfers.append(existing_trf)
+                            active_trf_ids.add(trf_id)
                         else:
                             trf = InventoryTransfer(
                                 id=trf_id,

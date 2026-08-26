@@ -24,7 +24,8 @@ from backend.app.routers import (
     assistant,
     ws,
     auth,
-    users
+    users,
+    suppliers
 )
 
 logging.basicConfig(
@@ -83,6 +84,7 @@ app.include_router(notifications.router)
 app.include_router(metrics.router)
 app.include_router(assistant.router)
 app.include_router(ws.router)
+app.include_router(suppliers.router)
 
 
 @app.get("/health", tags=["Health"])

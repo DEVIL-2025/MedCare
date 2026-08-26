@@ -12,7 +12,7 @@ from backend.app.models.transaction import InventoryTransaction
 from backend.app.schemas.alert import AlertActionRequest
 from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
 from backend.app.routers.ws import ws_manager
-from backend.app.utils.timezone import get_now_ist, get_today_ist, format_ist_datetime, format_ist_date
+from backend.app.utils.timezone import get_now_ist, get_today_ist, format_ist_datetime, format_ist_date, to_ist_iso
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
 
@@ -103,18 +103,21 @@ async def get_alerts_overview(
             "escalationLevel": a.escalation_level,
             "isEscalated": a.is_escalated,
             "createdAt": format_ist_datetime(a.created_at),
-            "createdAtRaw": a.created_at.isoformat() if a.created_at else None
+            "createdAtRaw": to_ist_iso(a.created_at)
         })
 
-    # Dynamic Alert Type Distribution from DB
+    # Dynamic Alert Type Distribution from DB (Active Alerts only)
     type_counts = {}
     for a in all_alerts:
-        formatted_type = a.alert_type.replace("_", " ").title()
-        type_counts[formatted_type] = type_counts.get(formatted_type, 0) + 1
+        if a.status != "Resolved":
+            t_raw = a.alert_type or "STOCKOUT"
+            formatted_type = t_raw.replace("_", " ").title()
+            type_counts[formatted_type] = type_counts.get(formatted_type, 0) + 1
 
     color_palette = {
         "Stockout": "#D64545",
         "Stockout Risk": "#D64545",
+        "Shortage": "#D64545",
         "Low Stock": "#E58A24",
         "Expiry Risk": "#D5A72C",
         "Demand Surge": "#177A5B",
@@ -146,36 +149,23 @@ async def get_alerts_overview(
         for a in top_crit
     ]
 
-    # Dynamic Escalations Activity from escalations table
+    # Dynamic Escalations Activity from escalations table only (No mock / tx fallback)
     esc_res = await db.execute(
-        select(AlertEscalation).order_by(AlertEscalation.escalated_at.desc()).limit(6)
+        select(AlertEscalation).order_by(AlertEscalation.escalated_at.desc()).limit(8)
     )
     escalations = esc_res.scalars().all()
     
     recent_activity = [
         {
             "id": e.id,
-            "text": f"Alert {e.alert_id} escalated to L{e.to_level} ({e.assigned_to})",
-            "detail": e.reason or e.action_taken,
-            "time": format_ist_datetime(e.escalated_at, fmt="%I:%M %p IST"),
-            "status": e.status
+            "alert_id": e.alert_id,
+            "text": f"Alert {e.alert_id} escalated to Level {e.to_level}",
+            "detail": f"Assigned to {e.assigned_to}. {e.reason or e.action_taken or 'Escalated due to SLA urgency.'}",
+            "time": format_ist_datetime(e.escalated_at, fmt="%d %b, %I:%M %p IST"),
+            "status": e.status or "OPEN"
         }
         for e in escalations
     ]
-    if not recent_activity:
-        # Fallback to recent transactions
-        tx_res = await db.execute(select(InventoryTransaction).order_by(InventoryTransaction.timestamp.desc()).limit(4))
-        txs = tx_res.scalars().all()
-        recent_activity = [
-            {
-                "id": f"TX-{tx.id}",
-                "text": f"{tx.transaction_type}: {tx.quantity:,} units {tx.sku} @ {tx.warehouse_id}",
-                "detail": tx.reason or "Stock movement logged",
-                "time": format_ist_datetime(tx.timestamp, fmt="%I:%M %p IST"),
-                "status": "COMPLETED"
-            }
-            for tx in txs
-        ]
 
     return {
         "counts": counts,

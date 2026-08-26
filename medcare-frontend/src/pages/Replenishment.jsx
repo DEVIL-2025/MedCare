@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Download, Boxes, Clock, ArrowRight,
-  ChevronLeft, ChevronRight, Check, X, Info, Sparkles, ArrowRightLeft, CheckCircle2, FileCheck2
+  ChevronLeft, ChevronRight, Check, X, Info, Sparkles, ArrowRightLeft, CheckCircle2, Search, History
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/ui/StatCard';
@@ -10,21 +10,19 @@ import Tabs from '../components/ui/Tabs';
 import Modal from '../components/ui/Modal';
 import LoadingState from '../components/ui/LoadingState';
 import ErrorState from '../components/ui/ErrorState';
+import EmptyState from '../components/ui/EmptyState';
 import { api } from '../api/client';
 import { useControlTower } from '../context/ControlTowerContext';
 import { formatDate, formatDateTime } from '../utils/dateUtils';
 
 const priorityTone = { critical: 'critical', high: 'warning', medium: 'medium', low: 'good' };
 const priorityLabel = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
-const requestStatusTone = { Pending: 'medium', Acknowledged: 'warning', In_progress: 'warning', Approved: 'good', Completed: 'good', Rejected: 'critical' };
-const poStatusTone = { Draft: 'neutral', Sent: 'medium', Received: 'good', Approved: 'good', Completed: 'good' };
+const poStatusTone = { Draft: 'neutral', Sent: 'medium', Received: 'good', Approved: 'good', Completed: 'good', Executed: 'good' };
 
 const TABS = [
   'Replenishment Recommendations',
-  'Active Demands',
-  'Completed Demands',
   'Transfers & FEFO Balancing',
-  'Approved Orders',
+  'FEFO Transfer History',
   'Purchase Orders'
 ];
 
@@ -46,6 +44,12 @@ export default function Replenishment() {
   const [actionSuccess, setActionSuccess] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [actionProcessing, setActionProcessing] = useState(false);
+
+  // Independent search states for each of the 4 sections
+  const [recSearch, setRecSearch] = useState('');
+  const [transferSearch, setTransferSearch] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
+  const [poSearch, setPoSearch] = useState('');
 
   useEffect(() => {
     async function loadMeta() {
@@ -173,38 +177,6 @@ export default function Replenishment() {
     }
   }
 
-  async function handleAcknowledgeDemand(id) {
-    setActionProcessing(true);
-    setActionError(null);
-    try {
-      const res = await api.acknowledgeDemand(id);
-      setActionSuccess(res.message || `Demand ${id} acknowledged in PostgreSQL.`);
-      triggerRefresh();
-      await loadReplenishment();
-      setTimeout(() => setActionSuccess(null), 3000);
-    } catch (err) {
-      setActionError(`Acknowledgment failed: ${err.message}`);
-    } finally {
-      setActionProcessing(false);
-    }
-  }
-
-  async function handleCompleteDemand(id) {
-    setActionProcessing(true);
-    setActionError(null);
-    try {
-      const res = await api.completeDemand(id);
-      setActionSuccess(res.message || `Demand ${id} successfully completed and archived in PostgreSQL.`);
-      triggerRefresh();
-      await loadReplenishment();
-      setTimeout(() => setActionSuccess(null), 3000);
-    } catch (err) {
-      setActionError(`Demand completion failed: ${err.message}`);
-    } finally {
-      setActionProcessing(false);
-    }
-  }
-
   async function handleExecuteTransfer(transferId) {
     setActionProcessing(true);
     setActionError(null);
@@ -235,10 +207,58 @@ export default function Replenishment() {
   const transfer_opportunities = data?.transfer_opportunities || [];
   const top_suppliers = data?.top_suppliers || [];
   const replenishment_by_category = data?.replenishment_by_category || [];
-  const active_demands = data?.active_demands || data?.replenishment_requests || [];
-  const completed_demands = data?.completed_demands || [];
-  const approved_orders = data?.approved_orders || [];
   const purchase_orders = data?.purchase_orders || [];
+  const fefo_transfer_history = data?.fefo_transfer_history || data?.completed_demands || [];
+
+  // Filtered lists for each independent search bar
+  const filteredRecommendations = recommendations.filter((rec) => {
+    if (!recSearch) return true;
+    const q = recSearch.toLowerCase().trim();
+    return (
+      (rec.name || '').toLowerCase().includes(q) ||
+      (rec.sku || '').toLowerCase().includes(q) ||
+      (rec.warehouse || '').toLowerCase().includes(q) ||
+      (rec.supplier || '').toLowerCase().includes(q) ||
+      (rec.priority || '').toLowerCase().includes(q)
+    );
+  });
+
+  const filteredTransfers = transfer_opportunities.filter((t) => {
+    if (!transferSearch) return true;
+    const q = transferSearch.toLowerCase().trim();
+    return (
+      (t.product || '').toLowerCase().includes(q) ||
+      (t.sku || '').toLowerCase().includes(q) ||
+      (t.from || '').toLowerCase().includes(q) ||
+      (t.to || '').toLowerCase().includes(q) ||
+      (t.reason || '').toLowerCase().includes(q)
+    );
+  });
+
+  const filteredHistory = fefo_transfer_history.filter((h) => {
+    if (!historySearch) return true;
+    const q = historySearch.toLowerCase().trim();
+    return (
+      (h.product || h.name || '').toLowerCase().includes(q) ||
+      (h.sku || '').toLowerCase().includes(q) ||
+      (h.from || h.sourceWarehouse || '').toLowerCase().includes(q) ||
+      (h.to || h.warehouse || h.destinationWarehouse || '').toLowerCase().includes(q) ||
+      (h.id || h.referenceId || '').toLowerCase().includes(q) ||
+      (h.batchId || '').toLowerCase().includes(q)
+    );
+  });
+
+  const filteredPurchaseOrders = purchase_orders.filter((po) => {
+    if (!poSearch) return true;
+    const q = poSearch.toLowerCase().trim();
+    return (
+      (po.id || '').toLowerCase().includes(q) ||
+      (po.supplier || '').toLowerCase().includes(q) ||
+      (po.sku || '').toLowerCase().includes(q) ||
+      (po.warehouse || '').toLowerCase().includes(q) ||
+      (po.status || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="space-y-5">
@@ -261,18 +281,33 @@ export default function Replenishment() {
         </div>
       )}
 
-      {/* Tab 1: Replenishment Recommendations */}
+      {/* Section 1: Replenishment Recommendations */}
       {tab === 'Replenishment Recommendations' && (
         <div className="space-y-5">
           <div className="grid grid-cols-1 xl:grid-cols-4 gap-5">
             <div className="xl:col-span-3 bg-white rounded-lg border border-ink-100 shadow-card">
-              <div className="p-3.5 border-b border-ink-100 flex items-center justify-between">
-                <h3 className="text-[15px] font-semibold text-ink-900">Explainable Replenishment Recommendations</h3>
-                <span className="text-[11px] text-ink-500 font-medium">Dynamically computed from ML forecasts & lead-time buffers</span>
+              <div className="p-3.5 border-b border-ink-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-[15px] font-semibold text-ink-900">Explainable Replenishment Recommendations</h3>
+                  <span className="text-[11px] text-ink-500 font-medium">Recommended Qty = ML Forecasted Demand − Current Stock</span>
+                </div>
+                <div className="relative max-w-xs w-full">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+                  <input
+                    type="text"
+                    placeholder="Search recommendations by SKU, product, DC..."
+                    value={recSearch}
+                    onChange={(e) => setRecSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded border border-ink-200 focus:outline-none focus:border-forest-600 bg-cream-100/50"
+                  />
+                </div>
               </div>
 
-              {recommendations.length === 0 ? (
-                <EmptyState title="No Active Replenishment Triggers" description="All warehouses currently meet target days-of-cover." />
+              {filteredRecommendations.length === 0 ? (
+                <EmptyState
+                  title={recommendations.length === 0 ? "No Active Replenishment Triggers" : "No Matching Recommendations"}
+                  description={recommendations.length === 0 ? "All warehouses currently meet target days-of-cover." : "Try adjusting your search keywords."}
+                />
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-[12px]">
@@ -289,7 +324,7 @@ export default function Replenishment() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-ink-100">
-                      {recommendations.map((rec) => (
+                      {filteredRecommendations.map((rec) => (
                         <tr key={rec.id} className="hover:bg-cream-100/60 transition-colors">
                           <td className="py-2.5 px-3">
                             <Badge tone={priorityTone[rec.priority] || 'warning'}>
@@ -303,7 +338,9 @@ export default function Replenishment() {
                           <td className="py-2.5 px-3 font-mono font-medium text-ink-700">{rec.warehouse}</td>
                           <td className="py-2.5 px-3 font-medium text-ink-800">{Number(rec.currentStock || 0).toLocaleString()}</td>
                           <td className="py-2.5 px-3 text-ink-600">{Number(rec.forecastDemand || 0).toLocaleString()}</td>
-                          <td className="py-2.5 px-3 font-bold text-forest-800">{Number(rec.recommendedQty || 0).toLocaleString()}</td>
+                          <td className="py-2.5 px-3 font-bold text-forest-800">
+                            {Number(rec.recommendedQty !== undefined ? rec.recommendedQty : Math.max(0, (rec.forecastDemand || 0) - (rec.currentStock || 0))).toLocaleString()}
+                          </td>
                           <td className="py-2.5 px-3">
                             <span className="text-[11px] px-2 py-0.5 rounded bg-cream-200 text-ink-800 font-medium">
                               {rec.decisionType === 'TRANSFER' || rec.decisionType === 'TRANSFER_FIRST' ? 'FEFO Transfer' : 'Procurement PO'}
@@ -378,150 +415,32 @@ export default function Replenishment() {
         </div>
       )}
 
-      {/* Tab 2: Active Demands */}
-      {tab === 'Active Demands' && (
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
-          <div className="flex items-center justify-between border-b border-ink-100 pb-2.5">
-            <div>
-              <h3 className="text-[15px] font-bold text-ink-900">Active Replenishment Demands & Tasks</h3>
-              <p className="text-[11.5px] text-ink-500">Live operational demands awaiting acknowledgment, allocation, or fulfillment.</p>
-            </div>
-            <span className="text-[11px] bg-amber-100 text-amber-900 px-2 py-0.5 rounded font-bold">
-              {active_demands.length} Active {active_demands.length === 1 ? 'Demand' : 'Demands'}
-            </span>
-          </div>
-
-          {active_demands.length === 0 ? (
-            <EmptyState title="No Active Demands Pending" description="All replenishment demands have been successfully fulfilled or marked completed." />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[12px] border-collapse">
-                <thead className="bg-cream-200/60 text-ink-600 font-semibold border-b border-ink-100 text-[11px] uppercase">
-                  <tr>
-                    <th className="py-2.5 px-3">Demand ID</th>
-                    <th className="py-2.5 px-3">Product Name & SKU</th>
-                    <th className="py-2.5 px-3">Destination DC</th>
-                    <th className="py-2.5 px-3 text-right">Quantity</th>
-                    <th className="py-2.5 px-3">Source / Supplier</th>
-                    <th className="py-2.5 px-3">Requested Date</th>
-                    <th className="py-2.5 px-3 text-center">Status</th>
-                    <th className="py-2.5 px-3 text-right">Lifecycle Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {active_demands.map((d) => (
-                    <tr key={d.id} className="hover:bg-cream-100/60 transition-colors">
-                      <td className="py-2.5 px-3 font-mono font-bold text-forest-800">{d.demandId || d.id}</td>
-                      <td className="py-2.5 px-3">
-                        <div className="font-semibold text-ink-900">{d.name}</div>
-                        <div className="text-[10px] text-ink-400 font-mono">{d.sku}</div>
-                      </td>
-                      <td className="py-2.5 px-3 font-mono font-medium text-ink-700">{d.warehouse || d.destinationWarehouse}</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-ink-900">{Number(d.quantity || d.qty || 0).toLocaleString()}</td>
-                      <td className="py-2.5 px-3 text-ink-600 font-medium">{d.sourceWarehouse || 'Central Supplier'}</td>
-                      <td className="py-2.5 px-3 text-ink-500 text-[11.5px]">{d.requestedDate || d.date}</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <Badge tone={requestStatusTone[d.status] || 'medium'}>{d.status}</Badge>
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {d.rawStatus !== 'ACKNOWLEDGED' && (
-                            <button
-                              onClick={() => handleAcknowledgeDemand(d.id)}
-                              disabled={actionProcessing}
-                              className="px-2 py-1 text-[11px] font-medium border border-ink-200 rounded hover:bg-cream-200 text-ink-700 cursor-pointer disabled:opacity-50"
-                              title="Acknowledge Receipt of Demand"
-                            >
-                              Acknowledge
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleCompleteDemand(d.id)}
-                            disabled={actionProcessing}
-                            className="px-2.5 py-1 text-[11px] font-bold bg-forest-700 hover:bg-forest-600 text-white rounded shadow-xs cursor-pointer disabled:opacity-50"
-                            title="Mark Demand as Completed in PostgreSQL"
-                          >
-                            Mark Completed
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab 3: Completed Demands */}
-      {tab === 'Completed Demands' && (
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
-          <div className="flex items-center justify-between border-b border-ink-100 pb-2.5">
-            <div>
-              <h3 className="text-[15px] font-bold text-ink-900 flex items-center gap-1.5">
-                <CheckCircle2 size={16} className="text-forest-700" /> Completed & Fulfilled Replenishment Demands
-              </h3>
-              <p className="text-[11.5px] text-ink-500">Historical database audit log of completed replenishment demands and fulfilled transfers.</p>
-            </div>
-            <span className="text-[11px] bg-forest-100 text-forest-900 px-2 py-0.5 rounded font-bold">
-              {completed_demands.length} Completed {completed_demands.length === 1 ? 'Record' : 'Records'}
-            </span>
-          </div>
-
-          {completed_demands.length === 0 ? (
-            <EmptyState title="No Completed Demands Yet" description="Demands marked completed or fulfilled will appear in this database log." />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[12px] border-collapse">
-                <thead className="bg-cream-200/60 text-ink-600 font-semibold border-b border-ink-100 text-[11px] uppercase">
-                  <tr>
-                    <th className="py-2.5 px-3">Demand ID</th>
-                    <th className="py-2.5 px-3">Product Name & SKU</th>
-                    <th className="py-2.5 px-3">Destination DC</th>
-                    <th className="py-2.5 px-3 text-right">Fulfilled Quantity</th>
-                    <th className="py-2.5 px-3">Source / Supplier</th>
-                    <th className="py-2.5 px-3">Requested Date</th>
-                    <th className="py-2.5 px-3">Completion Date</th>
-                    <th className="py-2.5 px-3">Reference ID</th>
-                    <th className="py-2.5 px-3 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {completed_demands.map((cd, cdIdx) => (
-                    <tr key={cd.id || cdIdx} className="hover:bg-cream-100/60 transition-colors">
-                      <td className="py-2.5 px-3 font-mono font-bold text-ink-800">{cd.demandId || cd.id}</td>
-                      <td className="py-2.5 px-3">
-                        <div className="font-semibold text-ink-900">{cd.name}</div>
-                        <div className="text-[10px] text-ink-400 font-mono">{cd.sku}</div>
-                      </td>
-                      <td className="py-2.5 px-3 font-mono font-medium text-ink-700">{cd.warehouse || cd.destinationWarehouse}</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-forest-800">{Number(cd.quantity || cd.qty || 0).toLocaleString()} units</td>
-                      <td className="py-2.5 px-3 text-ink-600 font-medium">{cd.sourceWarehouse || 'Supplier'}</td>
-                      <td className="py-2.5 px-3 text-ink-500 text-[11px]">{cd.requestedDate || cd.date}</td>
-                      <td className="py-2.5 px-3 text-forest-900 font-medium text-[11px]">{cd.completedDate || cd.requestedDate || '-'}</td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-ink-500">{cd.referenceId || '-'}</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className="px-2 py-0.5 rounded text-[10.5px] font-bold bg-forest-100 text-forest-800">
-                          {cd.status || 'Completed'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab 4: Transfers & FEFO Balancing */}
+      {/* Section 2: Transfers & FEFO Balancing */}
       {tab === 'Transfers & FEFO Balancing' && (
         <div className="space-y-5">
           <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-            <h3 className="text-[15px] font-semibold text-ink-900 mb-3">Inter-DC FEFO Balancing Opportunities</h3>
-            {transfer_opportunities.length === 0 ? (
-              <EmptyState title="No Inter-DC Transfer Opportunities" description="No excess-shortage imbalance detected across DCs." />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-[15px] font-semibold text-ink-900">Inter-DC FEFO Balancing Opportunities</h3>
+                <p className="text-[11.5px] text-ink-500">Rebalance excess inventory towards deficit DCs to avoid procurement spend and prevent expiry.</p>
+              </div>
+              <div className="relative max-w-xs w-full">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+                <input
+                  type="text"
+                  placeholder="Search transfers by SKU, DC..."
+                  value={transferSearch}
+                  onChange={(e) => setTransferSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded border border-ink-200 focus:outline-none focus:border-forest-600 bg-cream-100/50"
+                />
+              </div>
+            </div>
+
+            {filteredTransfers.length === 0 ? (
+              <EmptyState
+                title={transfer_opportunities.length === 0 ? "No Inter-DC Transfer Opportunities" : "No Matching Transfers"}
+                description={transfer_opportunities.length === 0 ? "No excess-shortage imbalance detected across DCs." : "Try adjusting your search criteria."}
+              />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-[12.5px]">
@@ -537,7 +456,7 @@ export default function Replenishment() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
-                    {transfer_opportunities.map((t) => (
+                    {filteredTransfers.map((t) => (
                       <tr key={t.id} className="hover:bg-cream-100/60 transition-colors">
                         <td className="py-2.5 px-3 font-semibold text-ink-900">{t.product} ({t.sku})</td>
                         <td className="py-2.5 px-3 font-mono font-medium text-amber-800">{t.from}</td>
@@ -639,71 +558,134 @@ export default function Replenishment() {
         </div>
       )}
 
-      {/* Tab 5: Approved Orders */}
-      {tab === 'Approved Orders' && (
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[15px] font-semibold text-ink-900 mb-3">Approved Orders</h3>
-          <table className="w-full text-left text-[12.5px]">
-            <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
-              <tr>
-                <th className="py-2.5 px-3">PO Number</th>
-                <th className="py-2.5 px-3">Product SKU</th>
-                <th className="py-2.5 px-3">Warehouse</th>
-                <th className="py-2.5 px-3">Quantity</th>
-                <th className="py-2.5 px-3">Value</th>
-                <th className="py-2.5 px-3">Approved On</th>
-                <th className="py-2.5 px-3 text-right">Expected ETA</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100">
-              {approved_orders.map((o) => (
-                <tr key={o.id} className="hover:bg-cream-100/60 transition-colors">
-                  <td className="py-2.5 px-3 font-mono font-medium text-forest-700">{o.id}</td>
-                  <td className="py-2.5 px-3 font-semibold text-ink-900">{o.sku || o.name}</td>
-                  <td className="py-2.5 px-3 font-mono text-ink-700">{o.warehouse}</td>
-                  <td className="py-2.5 px-3 font-medium">{o.qty?.toLocaleString()}</td>
-                  <td className="py-2.5 px-3 font-semibold text-ink-900">{o.value}</td>
-                  <td className="py-2.5 px-3 text-ink-600">{o.approvedOn}</td>
-                  <td className="py-2.5 px-3 text-right font-medium text-forest-700">{o.eta}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Section 3: FEFO Transfer History */}
+      {tab === 'FEFO Transfer History' && (
+        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
+            <div>
+              <h3 className="text-[15px] font-bold text-ink-900 flex items-center gap-1.5">
+                <History size={16} className="text-forest-700" /> FEFO Transfer & Balancing History
+              </h3>
+              <p className="text-[11.5px] text-ink-500">Historical database audit log of executed FEFO inter-DC stock balancing movements.</p>
+            </div>
+            <div className="relative max-w-xs w-full">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+              <input
+                type="text"
+                placeholder="Search transfer history..."
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded border border-ink-200 focus:outline-none focus:border-forest-600 bg-cream-100/50"
+              />
+            </div>
+          </div>
+
+          {filteredHistory.length === 0 ? (
+            <EmptyState
+              title="No Transfer History Found"
+              description="Executed FEFO balancing transfers and completed actions will appear in this database log."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[12px]">
+                <thead className="bg-cream-200/60 text-ink-600 font-semibold border-b border-ink-100 text-[11px] uppercase">
+                  <tr>
+                    <th className="py-2.5 px-3">Transfer / Action ID</th>
+                    <th className="py-2.5 px-3">Product Name & SKU</th>
+                    <th className="py-2.5 px-3">From DC</th>
+                    <th className="py-2.5 px-3">To DC</th>
+                    <th className="py-2.5 px-3 text-right">Quantity Transferred</th>
+                    <th className="py-2.5 px-3">Batch ID</th>
+                    <th className="py-2.5 px-3 text-right">Est. Savings</th>
+                    <th className="py-2.5 px-3">Execution Time</th>
+                    <th className="py-2.5 px-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {filteredHistory.map((h, hIdx) => (
+                    <tr key={h.id || hIdx} className="hover:bg-cream-100/60 transition-colors">
+                      <td className="py-2.5 px-3 font-mono font-bold text-forest-800">{h.id || h.referenceId || `TRF-${hIdx + 1}`}</td>
+                      <td className="py-2.5 px-3">
+                        <div className="font-semibold text-ink-900">{h.product || h.name}</div>
+                        <div className="text-[10px] text-ink-400 font-mono">{h.sku}</div>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono font-medium text-amber-800">{h.from || h.sourceWarehouse || 'MUM-01'}</td>
+                      <td className="py-2.5 px-3 font-mono font-medium text-forest-800">{h.to || h.warehouse || h.destinationWarehouse || 'PAT-01'}</td>
+                      <td className="py-2.5 px-3 text-right font-bold text-ink-900">{Number(h.quantity || h.qty || 0).toLocaleString()} units</td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-ink-600">{h.batchId || 'BAT-AUTO-FEFO'}</td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-forest-700">{h.savings || '₹0.5 L'}</td>
+                      <td className="py-2.5 px-3 text-ink-500 text-[11.5px]">{h.date || h.completedDate || 'Recent'}</td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded text-[10.5px] font-bold bg-forest-100 text-forest-800">
+                          {h.status || 'Executed'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Tab 6: Purchase Orders */}
+      {/* Section 4: Purchase Orders */}
       {tab === 'Purchase Orders' && (
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[15px] font-semibold text-ink-900 mb-3">Supplier Purchase Orders</h3>
-          <table className="w-full text-left text-[12.5px]">
-            <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
-              <tr>
-                <th className="py-2.5 px-3">PO Number</th>
-                <th className="py-2.5 px-3">Supplier</th>
-                <th className="py-2.5 px-3">SKU & Warehouse</th>
-                <th className="py-2.5 px-3">Quantity</th>
-                <th className="py-2.5 px-3">Total Value</th>
-                <th className="py-2.5 px-3">Order Date</th>
-                <th className="py-2.5 px-3 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100">
-              {purchase_orders.map((po) => (
-                <tr key={po.id} className="hover:bg-cream-100/60 transition-colors">
-                  <td className="py-2.5 px-3 font-mono font-medium text-forest-700">{po.id}</td>
-                  <td className="py-2.5 px-3 font-semibold text-ink-900">{po.supplier}</td>
-                  <td className="py-2.5 px-3 font-mono text-[11px] text-ink-600">{po.sku} @ {po.warehouse}</td>
-                  <td className="py-2.5 px-3 font-bold text-ink-800">{po.quantity?.toLocaleString()}</td>
-                  <td className="py-2.5 px-3 font-semibold text-ink-900">{po.value}</td>
-                  <td className="py-2.5 px-3 text-ink-500">{po.date}</td>
-                  <td className="py-2.5 px-3 text-right">
-                    <Badge tone={poStatusTone[po.status] || 'neutral'}>{po.status}</Badge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
+            <div>
+              <h3 className="text-[15px] font-semibold text-ink-900">Supplier Purchase Orders</h3>
+              <p className="text-[11.5px] text-ink-500">Live procurement orders issued to pharmaceutical manufacturers & suppliers.</p>
+            </div>
+            <div className="relative max-w-xs w-full">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+              <input
+                type="text"
+                placeholder="Search purchase orders..."
+                value={poSearch}
+                onChange={(e) => setPoSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded border border-ink-200 focus:outline-none focus:border-forest-600 bg-cream-100/50"
+              />
+            </div>
+          </div>
+
+          {filteredPurchaseOrders.length === 0 ? (
+            <EmptyState
+              title={purchase_orders.length === 0 ? "No Purchase Orders" : "No Matching Purchase Orders"}
+              description={purchase_orders.length === 0 ? "Approved replenishment orders will generate supplier POs." : "Try adjusting your search criteria."}
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[12.5px]">
+                <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
+                  <tr>
+                    <th className="py-2.5 px-3">PO Number</th>
+                    <th className="py-2.5 px-3">Supplier</th>
+                    <th className="py-2.5 px-3">SKU & Warehouse</th>
+                    <th className="py-2.5 px-3">Quantity</th>
+                    <th className="py-2.5 px-3">Total Value</th>
+                    <th className="py-2.5 px-3">Order Date</th>
+                    <th className="py-2.5 px-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {filteredPurchaseOrders.map((po) => (
+                    <tr key={po.id} className="hover:bg-cream-100/60 transition-colors">
+                      <td className="py-2.5 px-3 font-mono font-medium text-forest-700">{po.id}</td>
+                      <td className="py-2.5 px-3 font-semibold text-ink-900">{po.supplier}</td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-ink-600">{po.sku} @ {po.warehouse}</td>
+                      <td className="py-2.5 px-3 font-bold text-ink-800">{po.quantity?.toLocaleString()}</td>
+                      <td className="py-2.5 px-3 font-semibold text-ink-900">{po.value}</td>
+                      <td className="py-2.5 px-3 text-ink-500">{po.date}</td>
+                      <td className="py-2.5 px-3 text-right">
+                        <Badge tone={poStatusTone[po.status] || 'neutral'}>{po.status}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -722,7 +704,9 @@ export default function Replenishment() {
               </div>
               <div className="flex justify-between">
                 <span className="text-ink-500">Recommended Order:</span>
-                <span className="font-bold text-forest-800">{reviewItem.recommendedQty?.toLocaleString()} units</span>
+                <span className="font-bold text-forest-800">
+                  {Number(reviewItem.recommendedQty !== undefined ? reviewItem.recommendedQty : Math.max(0, (reviewItem.forecastDemand || 0) - (reviewItem.currentStock || 0))).toLocaleString()} units
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-ink-500">Decision Policy:</span>
@@ -749,40 +733,37 @@ export default function Replenishment() {
               </div>
             </div>
 
-            {/* Live FEFO Batches for this SKU */}
-            <div className="border-t border-ink-100 pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-ink-900 uppercase text-[11.5px]">FEFO Batch Dispatch Priority:</span>
+            {/* FEFO Batch Allocation Breakdown inside Modal */}
+            <div className="border-t border-ink-100 pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-ink-900">Live FEFO Batch Allocation</span>
                 <span className="text-[11px] text-ink-500 font-medium">Earliest valid expiry prioritized</span>
               </div>
+
               {loadingFefo ? (
-                <div className="py-3 text-center text-ink-400 text-[11.5px]">Loading live batch schedule...</div>
+                <div className="py-4 text-center text-ink-400 text-[11.5px]">Loading live batch allocations from PostgreSQL...</div>
               ) : fefoBatches.length === 0 ? (
-                <div className="py-2 text-center text-ink-400 text-[11.5px] bg-cream-100 rounded">No active batches in PostgreSQL for this warehouse.</div>
+                <div className="p-2.5 rounded bg-amber-50 text-amber-900 text-[11px] border border-amber-200">
+                  No near-expiry source batches available in network. Procurement purchase order recommended.
+                </div>
               ) : (
-                <div className="max-h-40 overflow-y-auto rounded border border-ink-100">
+                <div className="max-h-36 overflow-y-auto border border-ink-100 rounded">
                   <table className="w-full text-left text-[11.5px]">
-                    <thead className="bg-cream-200 text-ink-600 sticky top-0 font-semibold">
+                    <thead className="bg-cream-200/80 text-ink-500 font-semibold sticky top-0">
                       <tr>
-                        <th className="py-1.5 px-2">Priority</th>
-                        <th className="py-1.5 px-2">Batch</th>
+                        <th className="py-1.5 px-2">Batch #</th>
+                        <th className="py-1.5 px-2">DC</th>
                         <th className="py-1.5 px-2">Expiry</th>
-                        <th className="py-1.5 px-2">Days Left</th>
-                        <th className="py-1.5 px-2 text-right">Avail Qty</th>
+                        <th className="py-1.5 px-2 text-right">Allocated Qty</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-ink-100">
                       {fefoBatches.map((b) => (
                         <tr key={b.batch_id} className="hover:bg-cream-100">
-                          <td className="py-1 px-2">
-                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${b.priority === 1 ? 'bg-forest-100 text-forest-800' : 'bg-cream-200 text-ink-700'}`}>
-                              Rank {b.priority}
-                            </span>
-                          </td>
-                          <td className="py-1 px-2 font-mono font-medium">{b.batch_id}</td>
-                          <td className="py-1 px-2 text-ink-700">{b.expiry_date}</td>
-                          <td className="py-1 px-2 text-ink-600">{b.days_to_expiry}d</td>
-                          <td className="py-1 px-2 text-right font-bold text-forest-800">{b.available_quantity?.toLocaleString()}</td>
+                          <td className="py-1.5 px-2 font-mono font-medium">{b.batch_id}</td>
+                          <td className="py-1.5 px-2 font-mono text-ink-600">{b.warehouse_id}</td>
+                          <td className="py-1.5 px-2 text-ink-700">{b.expiry_date}</td>
+                          <td className="py-1.5 px-2 text-right font-bold text-forest-700">{b.allocated_quantity?.toLocaleString()} units</td>
                         </tr>
                       ))}
                     </tbody>
@@ -791,20 +772,26 @@ export default function Replenishment() {
               )}
             </div>
 
-            <div className="flex justify-end gap-2.5 pt-3 border-t border-ink-100">
+            <div className="flex justify-end gap-2 pt-3 border-t border-ink-100">
+              <button
+                onClick={() => setReviewItem(null)}
+                className="px-3 py-1.5 text-[12px] border border-ink-200 rounded text-ink-700 hover:bg-cream-200 font-medium cursor-pointer"
+              >
+                Close
+              </button>
               <button
                 onClick={() => handleReject(reviewItem.id)}
                 disabled={actionProcessing}
-                className="px-3.5 py-1.5 border border-brick-600/40 text-brick-700 rounded-md hover:bg-brick-100 cursor-pointer disabled:opacity-50"
+                className="px-3 py-1.5 text-[12px] border border-brick-600/30 text-brick-700 bg-brick-50 hover:bg-brick-100 rounded font-medium cursor-pointer disabled:opacity-50"
               >
                 Reject
               </button>
               <button
                 onClick={() => handleApprove(reviewItem.id)}
                 disabled={actionProcessing}
-                className="px-4 py-1.5 font-medium bg-forest-700 text-white rounded-md hover:bg-forest-600 shadow-sm cursor-pointer disabled:opacity-50"
+                className="px-3.5 py-1.5 text-[12px] bg-forest-700 hover:bg-forest-600 text-white rounded font-medium shadow-xs cursor-pointer disabled:opacity-50"
               >
-                Approve & Create PO
+                Approve & Execute
               </button>
             </div>
           </div>

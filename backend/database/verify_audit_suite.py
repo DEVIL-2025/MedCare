@@ -49,6 +49,13 @@ async def run_audit():
         print("   MEDCARE PHARMA SCM CONTROL TOWER - COMPLETE SECTION-BY-SECTION AUDIT")
         print("="*80 + "\n")
 
+        # Authenticate as Admin
+        login_res = await client.post("/api/auth/login", json={"identifier": "admin", "password": "Admin@12345"})
+        if login_res.status_code == 200:
+            token = login_res.json().get("access_token")
+            client.headers["Authorization"] = f"Bearer {token}"
+            print("[Auth] Successfully authenticated as admin for audit suite.")
+
         # =========================================================================
         # SECTION 1: EXECUTIVE DASHBOARD
         # =========================================================================
@@ -460,10 +467,10 @@ async def run_audit():
         amx_rec = next((r for r in del_recs if r["sku"] == "A-2381" and r["status"] == "PENDING"), None)
         assert amx_rec is not None, "Recommendation for A-2381 was not generated"
 
-        # Restore stock
+        # Restore stock to well above reorder point and demand
         async with AsyncSessionLocal() as session:
             await session.execute(
-                update(Inventory).where(and_(Inventory.sku == "A-2381", Inventory.warehouse_id == "DEL-02")).values(current_stock=6000)
+                update(Inventory).where(and_(Inventory.sku == "A-2381", Inventory.warehouse_id == "DEL-02")).values(current_stock=15000)
             )
             await session.commit()
 

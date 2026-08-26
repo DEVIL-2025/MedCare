@@ -1,8 +1,9 @@
 import asyncio
 from datetime import datetime, date, timedelta, timezone
 import random
+import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text, func
 
 from backend.app.database import AsyncSessionLocal, engine, Base, init_database
 from backend.app.models import (
@@ -12,7 +13,7 @@ from backend.app.models import (
     ReplenishmentRecommendation, PurchaseOrder, InventoryTransfer,
     Alert, NotificationLog, Scenario, ScenarioResult, SystemSetting,
     DemandSignal, AlertEscalation, SalesOrder,
-    User, Role, Permission, RolePermission, AuditLog
+    User, Role, Permission, RolePermission, AuditLog, Supplier
 )
 from backend.app.services.auth_service import AuthService
 
@@ -82,11 +83,79 @@ PERMISSIONS_DATA = [
 ]
 
 
+# Exactly 5 Warehouses across India
+WAREHOUSES_DATA = [
+    {"id": "MUM-01", "name": "Mumbai Central DC", "location": "Bhiwandi, Maharashtra", "tier": "Mother DC", "region": "West", "capacity_units": 350000, "current_utilization_pct": 81.4, "health_score": 94, "status": "Healthy", "is_active": True, "map_x": 30, "map_y": 55},
+    {"id": "DEL-02", "name": "Delhi NCR DC", "location": "Kundli, Haryana", "tier": "Tier-1 DC", "region": "North", "capacity_units": 280000, "current_utilization_pct": 78.5, "health_score": 88, "status": "Healthy", "is_active": True, "map_x": 42, "map_y": 25},
+    {"id": "BLR-01", "name": "Bengaluru South DC", "location": "Hosur Road, Karnataka", "tier": "Tier-1 DC", "region": "South", "capacity_units": 240000, "current_utilization_pct": 79.2, "health_score": 86, "status": "Healthy", "is_active": True, "map_x": 38, "map_y": 75},
+    {"id": "PAT-01", "name": "Patna Regional DC", "location": "Fatuha, Bihar", "tier": "Tier-2 DC", "region": "East", "capacity_units": 180000, "current_utilization_pct": 65.5, "health_score": 75, "status": "At Risk", "is_active": True, "map_x": 72, "map_y": 38},
+    {"id": "HYD-01", "name": "Hyderabad Regional DC", "location": "Medchal, Telangana", "tier": "Tier-2 DC", "region": "South", "capacity_units": 160000, "current_utilization_pct": 68.7, "health_score": 80, "status": "Healthy", "is_active": True, "map_x": 46, "map_y": 58}
+]
+
+# Exactly 5 Suppliers
+SUPPLIERS_DATA = [
+    {"id": "SUPP-001", "name": "Sun Pharma Labs", "contact_email": "orders@sunpharma.example.com", "contact_phone": "+91 98200 11223", "lead_time_days": 5, "category": "Analgesics, Antibiotics, Gastro Care", "status": "Active", "is_active": True},
+    {"id": "SUPP-002", "name": "Cipla Healthcare", "contact_email": "dispatch@cipla.example.com", "contact_phone": "+91 98300 44556", "lead_time_days": 4, "category": "Respiratory, Cough & Cold, Anti-Infectives", "status": "Active", "is_active": True},
+    {"id": "SUPP-003", "name": "Dr. Reddy's Laboratories", "contact_email": "supply@drreddys.example.com", "contact_phone": "+91 98400 77889", "lead_time_days": 6, "category": "Diabetes Care, Cardiovascular, Chronic Care", "status": "Active", "is_active": True},
+    {"id": "SUPP-004", "name": "Lupin Pharmaceuticals", "contact_email": "orders@lupin.example.com", "contact_phone": "+91 98100 99001", "lead_time_days": 7, "category": "Antibiotics, Pain Management, Vitamins", "status": "Active", "is_active": True},
+    {"id": "SUPP-005", "name": "Biocon Biologics", "contact_email": "coldchain@biocon.example.com", "contact_phone": "+91 98800 33445", "lead_time_days": 4, "category": "Cold-Chain, Insulin, Specialty Biologics", "status": "Active", "is_active": True}
+]
+
+# Exactly 20 Essential Pharmaceutical SKUs across 8 Therapeutic Categories
+# Total target network stock VALUE ~ Rs. 9.36 Lakhs (<= Rs. 10 Lakh / 1,000,000 cap)
+PRODUCTS_DATA = [
+    # 1. Analgesics & Antipyretics
+    {"sku": "P-1042", "name": "Paracetamol 500mg", "category": "Analgesics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 1500, "default_safety_stock": 600, "moq": 100, "unit_cost": 25.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-001", "target_network_stock": 3000},
+    {"sku": "P-1065", "name": "Paracetamol 650mg", "category": "Analgesics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 1000, "default_safety_stock": 400, "moq": 100, "unit_cost": 30.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-001", "target_network_stock": 2000},
+    {"sku": "IBU-400", "name": "Ibuprofen 400mg", "category": "Analgesics", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 200, "default_safety_stock": 80, "moq": 100, "unit_cost": 35.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-004", "target_network_stock": 1200},
+    
+    # 2. Antibiotics & Anti-Infectives
+    {"sku": "A-2381", "name": "Amoxicillin 250mg", "category": "Antibiotics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 540, "default_reorder_point": 800, "default_safety_stock": 350, "moq": 100, "unit_cost": 60.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-001", "target_network_stock": 1000},
+    {"sku": "AZ-3391", "name": "Azithromycin 500mg", "category": "Antibiotics", "criticality": "Critical", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 80, "default_safety_stock": 30, "moq": 50, "unit_cost": 120.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-002", "target_network_stock": 450},
+    {"sku": "CIP-500", "name": "Ciprofloxacin 500mg", "category": "Antibiotics", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 120, "default_safety_stock": 50, "moq": 50, "unit_cost": 55.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-004", "target_network_stock": 650},
+    
+    # 3. Cough & Cold
+    {"sku": "C-5562", "name": "Cough Syrup 100ml", "category": "Cough & Cold", "criticality": "High", "unit": "Bottles", "shelf_life_days": 730, "default_reorder_point": 140, "default_safety_stock": 60, "moq": 50, "unit_cost": 70.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-002", "target_network_stock": 750},
+    {"sku": "CET-10", "name": "Cetirizine 10mg", "category": "Cough & Cold", "criticality": "Medium", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 350, "default_safety_stock": 150, "moq": 100, "unit_cost": 18.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-002", "target_network_stock": 2000},
+    
+    # 4. Respiratory
+    {"sku": "S-1120", "name": "Salbutamol Inhaler", "category": "Respiratory", "criticality": "Critical", "unit": "Inhalers", "shelf_life_days": 730, "default_reorder_point": 60, "default_safety_stock": 25, "moq": 30, "unit_cost": 150.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-002", "target_network_stock": 300},
+    {"sku": "BUD-200", "name": "Budesonide Respules 0.5mg", "category": "Respiratory", "criticality": "Critical", "unit": "Ampoules", "shelf_life_days": 540, "default_reorder_point": 50, "default_safety_stock": 20, "moq": 30, "unit_cost": 180.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-002", "target_network_stock": 240},
+    
+    # 5. Diabetes Care
+    {"sku": "M-5521", "name": "Metformin 500mg", "category": "Diabetes Care", "criticality": "High", "unit": "Strips", "shelf_life_days": 1095, "default_reorder_point": 400, "default_safety_stock": 160, "moq": 100, "unit_cost": 30.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-003", "target_network_stock": 2400},
+    {"sku": "GLI-2", "name": "Glimepiride 2mg", "category": "Diabetes Care", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 150, "default_safety_stock": 60, "moq": 50, "unit_cost": 45.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-003", "target_network_stock": 800},
+    {"sku": "INS-100", "name": "Human Insulin 100IU", "category": "Diabetes Care", "criticality": "Critical", "unit": "Vials", "shelf_life_days": 540, "default_reorder_point": 30, "default_safety_stock": 15, "moq": 20, "unit_cost": 300.0, "is_temperature_sensitive": True, "is_active": True, "supplier_id": "SUPP-005", "target_network_stock": 150},
+    
+    # 6. Gastro Care
+    {"sku": "O-3341", "name": "Omeprazole 20mg", "category": "Gastro Care", "criticality": "Medium", "unit": "Capsules", "shelf_life_days": 730, "default_reorder_point": 160, "default_safety_stock": 70, "moq": 50, "unit_cost": 40.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-001", "target_network_stock": 900},
+    {"sku": "PAN-40", "name": "Pantoprazole 40mg", "category": "Gastro Care", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 200, "default_safety_stock": 80, "moq": 50, "unit_cost": 50.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-001", "target_network_stock": 1100},
+    
+    # 7. Cardiovascular
+    {"sku": "ATV-10", "name": "Atorvastatin 10mg", "category": "Cardiovascular", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 130, "default_safety_stock": 50, "moq": 50, "unit_cost": 65.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-003", "target_network_stock": 700},
+    {"sku": "AML-5", "name": "Amlodipine 5mg", "category": "Cardiovascular", "criticality": "Medium", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 250, "default_safety_stock": 100, "moq": 50, "unit_cost": 28.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-003", "target_network_stock": 1300},
+    {"sku": "TEL-40", "name": "Telmisartan 40mg", "category": "Cardiovascular", "criticality": "High", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 130, "default_safety_stock": 50, "moq": 50, "unit_cost": 55.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-003", "target_network_stock": 750},
+    
+    # 8. Vitamins & Minerals
+    {"sku": "V-1122", "name": "Vitamin C 500mg", "category": "Vitamins", "criticality": "Low", "unit": "Strips", "shelf_life_days": 730, "default_reorder_point": 400, "default_safety_stock": 160, "moq": 100, "unit_cost": 20.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-004", "target_network_stock": 2200},
+    {"sku": "VD3-60K", "name": "Vitamin D3 60,000 IU", "category": "Vitamins", "criticality": "Medium", "unit": "Capsules", "shelf_life_days": 730, "default_reorder_point": 80, "default_safety_stock": 30, "moq": 50, "unit_cost": 80.0, "is_temperature_sensitive": False, "is_active": True, "supplier_id": "SUPP-004", "target_network_stock": 450}
+]
+
+# Warehouse distribution ratios (Total = 1.0)
+# MUM-01: 30%, DEL-02: 23%, BLR-01: 20%, PAT-01: 15%, HYD-01: 12%
+WH_DISTRIBUTION_WEIGHTS = {
+    "MUM-01": 0.30,
+    "DEL-02": 0.23,
+    "BLR-01": 0.20,
+    "PAT-01": 0.15,
+    "HYD-01": 0.12
+}
+
+
 async def seed_auth_data(session: AsyncSession, force: bool = False):
-    """Seeds roles, permissions, role-permission mappings, and initial users into PostgreSQL."""
+    """Seeds roles, permissions, role-permission mappings, and initial users."""
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # 1. Seed Roles
     roles_res = await session.execute(select(Role))
     existing_roles = {r.id: r for r in roles_res.scalars().all()}
 
@@ -109,7 +178,6 @@ async def seed_auth_data(session: AsyncSession, force: bool = False):
             session.add(manager_role)
         await session.flush()
 
-    # 2. Seed Permissions
     perms_res = await session.execute(select(Permission))
     existing_perms = {p.id: p for p in perms_res.scalars().all()}
 
@@ -122,35 +190,21 @@ async def seed_auth_data(session: AsyncSession, force: bool = False):
     if new_perms:
         await session.flush()
 
-    # 3. Seed Role-Permissions Mapping
     role_perms_res = await session.execute(select(RolePermission))
     existing_rp = {(rp.role_id, rp.permission_id) for rp in role_perms_res.scalars().all()}
 
-    admin_restricted_perms = set()  # Admin gets everything
     manager_restricted_perms = {
-        "inventory.delete_product",
-        "forecast.train",
-        "warehouses.manage",
-        "users.view",
-        "users.create",
-        "users.edit",
-        "users.deactivate",
-        "users.reset_password",
-        "users.assign_role",
-        "audit.view",
-        "system.configuration",
-        "system.database",
-        "system.migrations",
-        "system.data_management"
+        "inventory.create_product", "inventory.delete_product", "forecast.train", "warehouses.manage",
+        "users.view", "users.create", "users.edit", "users.deactivate",
+        "users.reset_password", "users.assign_role", "audit.view",
+        "system.configuration", "system.database", "system.migrations", "system.data_management"
     }
 
     new_mappings = []
     for p_data in PERMISSIONS_DATA:
         p_id = p_data["id"]
-        # Admin mapping
         if ("ADMIN", p_id) not in existing_rp:
             new_mappings.append(RolePermission(role_id="ADMIN", permission_id=p_id))
-        # Manager mapping (if not restricted)
         if p_id not in manager_restricted_perms and ("MANAGER", p_id) not in existing_rp:
             new_mappings.append(RolePermission(role_id="MANAGER", permission_id=p_id))
 
@@ -158,7 +212,6 @@ async def seed_auth_data(session: AsyncSession, force: bool = False):
         session.add_all(new_mappings)
         await session.flush()
 
-    # 4. Seed Initial Users
     users_res = await session.execute(select(User))
     existing_users = {u.user_id: u for u in users_res.scalars().all()}
 
@@ -214,171 +267,159 @@ async def seed_auth_data(session: AsyncSession, force: bool = False):
             u_obj.must_change_password = False
 
     await session.commit()
-    print("[Seeder] Auth & RBAC roles, permissions, and users successfully synchronized in PostgreSQL!")
+    print("[Seeder] Auth & RBAC roles, permissions, and users synchronized.")
 
 
 async def seed_database(session: AsyncSession, force: bool = False):
-    """Seed synthetic realistic data for MedCare Pharma SCM Control Tower with small values."""
-    print("[Seeder] Initializing Auth & RBAC tables...")
-    await seed_auth_data(session, force=force)
+    """
+    Seed fresh, synthetic dataset into PostgreSQL:
+    - 5 Warehouses
+    - 5 Suppliers
+    - 20 SKUs
+    - Live Inventory Stock VALUE sum <= Rs. 10 Lakh (Rs. 1,000,000 monetary cap)
+    - 180 Days of rich historical demand time-series for ML training
+    - Clean reference data and settings
+    """
+    print("[Seeder] Checking database initialization...")
+    today = date(2026, 8, 24)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    print("[Seeder] Checking existing business data...")
     if not force:
-        existing = await session.execute(select(Product))
-        if existing.scalars().first():
-            print("[Seeder] Database already populated. Re-verifying structure...")
+        # Check if database is already populated
+        existing_wh = (await session.execute(select(func.count(Warehouse.id)))).scalar()
+        existing_sku = (await session.execute(select(func.count(Product.sku)))).scalar()
+        if existing_wh and existing_wh > 0 and existing_sku and existing_sku > 0:
+            print(f"[Seeder] Database already populated ({existing_wh} warehouses, {existing_sku} SKUs). Skipping re-seed.")
+            await seed_auth_data(session, force=False)
             return
 
+    # 1. Clear existing data if force is requested
     if force:
-        print("[Seeder] Force reseed requested. Clearing existing tables...")
+        print("[Seeder] Force clear requested. Truncating transactional & master tables...")
+        # Clear in reverse FK dependency order
         for model in [
-            NotificationLog, AlertEscalation, Alert, InventoryTransfer, PurchaseOrder,
-            ReplenishmentRecommendation, ScenarioResult, Scenario,
+            ScenarioResult, Scenario, NotificationLog, AlertEscalation, Alert,
+            InventoryTransfer, PurchaseOrder, ReplenishmentRecommendation,
             InventoryRisk, DemandSurgeEvent, ForecastRecord,
             DemandSignal, Promotion, SeasonalEvent, DistributorOrder, DemandHistory,
-            SalesOrder, InventoryTransaction, Batch, Inventory, Warehouse, Product, SystemSetting
+            SalesOrder, InventoryTransaction, Batch, Inventory, Product, Warehouse, Supplier,
+            SystemSetting, AuditLog
         ]:
             await session.execute(delete(model))
-        await session.commit()
+        await session.flush()
 
-    print("[Seeder] Seeding Products...")
-    products = [Product(**p) for p in PRODUCTS_DATA]
-    session.add_all(products)
+    # 2. Seed Auth
+    await seed_auth_data(session, force=force)
+
+    # 3. Seed Suppliers (5 suppliers)
+    print("[Seeder] Seeding 5 Suppliers...")
+    suppliers = [Supplier(**s) for s in SUPPLIERS_DATA]
+    session.add_all(suppliers)
     await session.flush()
 
-    print("[Seeder] Seeding Warehouses...")
+    # 4. Seed Warehouses (5 warehouses)
+    print("[Seeder] Seeding 5 Warehouses...")
     warehouses = [Warehouse(**w) for w in WAREHOUSES_DATA]
     session.add_all(warehouses)
     await session.flush()
 
-    print("[Seeder] Seeding Inventory & Batches with Small Values...")
-    today = date(2026, 8, 24)
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    
-    # Specific Scenario Setup:
-    # 1. P-1042 (Paracetamol 500mg)
-    #    - MUM-01: Excess near-expiry (450 units expiring in 45 days)
-    #    - PAT-01: Severe shortage (25 units stock vs surge demand)
-    #    - BLR-01: Low stock (180 units vs ROP 250)
-    # 2. C-5562 (Cough Syrup)
-    #    - MUM-01: Near-expiry batch (140 units, expires in 22 days)
-    # 3. AZ-3391 (Azithromycin):
-    #    - HYD-01: Out of stock (0 units)
-    # 4. I-7783 (Ibuprofen):
-    #    - HYD-01: Low stock (190 units)
-    
+    # 5. Seed Products (20 SKUs)
+    print("[Seeder] Seeding 20 Products/SKUs...")
+    products = []
+    for p in PRODUCTS_DATA:
+        p_clean = {k: v for k, v in p.items() if k not in ["target_network_stock", "supplier_id"]}
+        products.append(Product(**p_clean))
+    session.add_all(products)
+    await session.flush()
+
+    # 6. Seed Inventory & Batches (Strictly <= Rs. 10 Lakh total monetary stock value)
+    print("[Seeder] Seeding Live Inventory & Batches across 5 DCs (Target Stock Value: ~Rs. 9.36 Lakhs)...")
     batches_to_add = []
     inventory_to_add = []
     transactions_to_add = []
-    
+
+    total_units_seeded = 0
+    total_value_seeded = 0.0
+
     for prod in PRODUCTS_DATA:
         sku = prod["sku"]
+        net_target = prod["target_network_stock"]
+        unit_cost = prod["unit_cost"]
+
         for wh in WAREHOUSES_DATA:
             wh_id = wh["id"]
+            wh_weight = WH_DISTRIBUTION_WEIGHTS[wh_id]
+            node_target_stock = int(round(net_target * wh_weight))
+
+            # Operational variations for realistic supply chain dynamics:
+            # 1. P-1042 in MUM-01: Excess stock with near-expiry batch (200 units)
+            # 2. P-1042 in PAT-01: Critical low stock (25 units) to trigger restock/transfer
+            # 3. AZ-3391 in HYD-01: Critical low stock / high demand
+            # 4. C-5562 in MUM-01: Batch expiring in 30 days
             
-            # Default stock heuristics with small values
+            res_stock = 0
+            inbound = 0
+            
             if sku == "P-1042" and wh_id == "MUM-01":
-                curr_stock = 550
-                res_stock = 40
-                inbound = 0
+                curr_stock = node_target_stock
+                near_exp_qty = 200
+                active_qty = curr_stock - near_exp_qty
+                b1 = Batch(id=f"BAT-{sku}-MUM-01-EXP", sku=sku, warehouse_id=wh_id, quantity=near_exp_qty, reserved_quantity=0, mfg_date=today - timedelta(days=685), expiry_date=today + timedelta(days=45), status="NEAR_EXPIRY")
+                b2 = Batch(id=f"BAT-{sku}-MUM-02-ACT", sku=sku, warehouse_id=wh_id, quantity=active_qty, reserved_quantity=0, mfg_date=today - timedelta(days=90), expiry_date=today + timedelta(days=640), status="ACTIVE")
+                batches_to_add.extend([b1, b2])
                 status = "OVERSTOCK"
                 risk_level = "low"
-                doc = 42.0
-                # Batch expiring in 45 days
-                b1 = Batch(id=f"BAT-{sku}-MUM-01", sku=sku, warehouse_id=wh_id, quantity=450, reserved_quantity=0, mfg_date=today - timedelta(days=680), expiry_date=today + timedelta(days=45), status="NEAR_EXPIRY")
-                b2 = Batch(id=f"BAT-{sku}-MUM-02", sku=sku, warehouse_id=wh_id, quantity=100, reserved_quantity=0, mfg_date=today - timedelta(days=100), expiry_date=today + timedelta(days=630), status="ACTIVE")
-                batches_to_add.extend([b1, b2])
+                doc = 45.0
 
             elif sku == "P-1042" and wh_id == "PAT-01":
+                # Critical stock for demo transfer scenario
                 curr_stock = 25
-                res_stock = 5
-                inbound = 0
+                res_stock = 0
+                b1 = Batch(id=f"BAT-{sku}-PAT-01", sku=sku, warehouse_id=wh_id, quantity=curr_stock, reserved_quantity=0, mfg_date=today - timedelta(days=120), expiry_date=today + timedelta(days=610), status="ACTIVE")
+                batches_to_add.append(b1)
                 status = "CRITICAL"
                 risk_level = "critical"
-                doc = 3.2  # Stockout in ~3.2 days!
-                b1 = Batch(id=f"BAT-{sku}-PAT-01", sku=sku, warehouse_id=wh_id, quantity=25, reserved_quantity=0, mfg_date=today - timedelta(days=90), expiry_date=today + timedelta(days=640), status="ACTIVE")
-                batches_to_add.append(b1)
-
-            elif sku == "P-1042" and wh_id == "BLR-01":
-                curr_stock = 180
-                res_stock = 15
-                inbound = 0
-                status = "LOW_STOCK"
-                risk_level = "high"
-                doc = 9.5
-                b1 = Batch(id=f"BAT-{sku}-BLR-01", sku=sku, warehouse_id=wh_id, quantity=180, reserved_quantity=0, mfg_date=today - timedelta(days=120), expiry_date=today + timedelta(days=610), status="ACTIVE")
-                batches_to_add.append(b1)
+                doc = 2.5
 
             elif sku == "C-5562" and wh_id == "MUM-01":
-                curr_stock = 140
-                res_stock = 10
-                inbound = 0
-                status = "LOW_STOCK"
-                risk_level = "high"
-                doc = 14.0
-                # Expiring in 22 days
-                b1 = Batch(id=f"BAT-{sku}-MUM-01", sku=sku, warehouse_id=wh_id, quantity=140, reserved_quantity=0, mfg_date=today - timedelta(days=708), expiry_date=today + timedelta(days=22), status="CRITICAL")
-                batches_to_add.append(b1)
-
-            elif sku == "AZ-3391" and wh_id == "HYD-01":
-                curr_stock = 0
-                res_stock = 0
-                inbound = 50
-                status = "OUT_OF_STOCK"
-                risk_level = "critical"
-                doc = 0.0
-
-            elif sku == "I-7783" and wh_id == "HYD-01":
-                curr_stock = 190
-                res_stock = 20
-                inbound = 0
-                status = "LOW_STOCK"
-                risk_level = "critical"
-                doc = 8.5
-                b1 = Batch(id=f"BAT-{sku}-HYD-01", sku=sku, warehouse_id=wh_id, quantity=190, reserved_quantity=0, mfg_date=today - timedelta(days=150), expiry_date=today + timedelta(days=580), status="ACTIVE")
-                batches_to_add.append(b1)
-
-            elif sku == "M-5521" and wh_id == "CHE-01":
-                curr_stock = 650
-                res_stock = 40
-                inbound = 0
+                curr_stock = node_target_stock
+                near_exp_qty = 60
+                active_qty = curr_stock - near_exp_qty
+                b1 = Batch(id=f"BAT-{sku}-MUM-01-EXP", sku=sku, warehouse_id=wh_id, quantity=near_exp_qty, reserved_quantity=0, mfg_date=today - timedelta(days=700), expiry_date=today + timedelta(days=30), status="CRITICAL")
+                b2 = Batch(id=f"BAT-{sku}-MUM-02-ACT", sku=sku, warehouse_id=wh_id, quantity=active_qty, reserved_quantity=0, mfg_date=today - timedelta(days=60), expiry_date=today + timedelta(days=670), status="ACTIVE")
+                batches_to_add.extend([b1, b2])
                 status = "HEALTHY"
                 risk_level = "low"
-                doc = 45.0
-                b1 = Batch(id=f"BAT-{sku}-CHE-01", sku=sku, warehouse_id=wh_id, quantity=650, reserved_quantity=0, mfg_date=today - timedelta(days=90), expiry_date=today + timedelta(days=640), status="ACTIVE")
+                doc = 28.0
+
+            elif sku == "AZ-3391" and wh_id == "HYD-01":
+                curr_stock = int(node_target_stock * 0.35)
+                inbound = 30
+                b1 = Batch(id=f"BAT-{sku}-HYD-01", sku=sku, warehouse_id=wh_id, quantity=curr_stock, reserved_quantity=0, mfg_date=today - timedelta(days=90), expiry_date=today + timedelta(days=640), status="ACTIVE")
                 batches_to_add.append(b1)
+                status = "LOW_STOCK"
+                risk_level = "high"
+                doc = 8.0
 
             else:
-                # Standard distributed profile with small realistic numbers
-                factor = 1.2 if wh["tier"] == "Metro DC" else (0.8 if wh["tier"] == "Tier-1 DC" else 0.4)
-                curr_stock = max(10, int(prod["default_reorder_point"] * factor * random.uniform(0.7, 1.4)))
-                res_stock = max(0, int(curr_stock * random.uniform(0.05, 0.12)))
-                inbound = int(prod["moq"]) if random.random() < 0.3 else 0
-                
-                if curr_stock == 0:
-                    status, risk_level, doc = "OUT_OF_STOCK", "critical", 0.0
-                elif curr_stock < prod["default_safety_stock"]:
-                    status, risk_level, doc = "CRITICAL", "critical", round(curr_stock / max(1.0, (prod["default_reorder_point"] / 15)), 1)
-                elif curr_stock < prod["default_reorder_point"]:
-                    status, risk_level, doc = "LOW_STOCK", "high", round(curr_stock / max(1.0, (prod["default_reorder_point"] / 15)), 1)
-                elif curr_stock > prod["default_reorder_point"] * 2.2:
-                    status, risk_level, doc = "OVERSTOCK", "low", round(curr_stock / max(1.0, (prod["default_reorder_point"] / 15)), 1)
+                curr_stock = node_target_stock
+                # Generate 1 or 2 standard active batches
+                if curr_stock > 300:
+                    split_1 = int(curr_stock * 0.6)
+                    split_2 = curr_stock - split_1
+                    b1 = Batch(id=f"BAT-{sku}-{wh_id}-A", sku=sku, warehouse_id=wh_id, quantity=split_1, reserved_quantity=0, mfg_date=today - timedelta(days=60), expiry_date=today + timedelta(days=670), status="ACTIVE")
+                    b2 = Batch(id=f"BAT-{sku}-{wh_id}-B", sku=sku, warehouse_id=wh_id, quantity=split_2, reserved_quantity=0, mfg_date=today - timedelta(days=30), expiry_date=today + timedelta(days=700), status="ACTIVE")
+                    batches_to_add.extend([b1, b2])
                 else:
-                    status, risk_level, doc = "HEALTHY", "low", round(curr_stock / max(1.0, (prod["default_reorder_point"] / 15)), 1)
-                
-                # Create standard active batch
-                exp_days = random.choice([400, 520, 650, 700])
-                b1 = Batch(
-                    id=f"BAT-{sku}-{wh_id}-{random.randint(100, 999)}",
-                    sku=sku,
-                    warehouse_id=wh_id,
-                    quantity=curr_stock,
-                    reserved_quantity=res_stock,
-                    mfg_date=today - timedelta(days=random.randint(30, 180)),
-                    expiry_date=today + timedelta(days=exp_days),
-                    status="ACTIVE"
-                )
-                batches_to_add.append(b1)
+                    b1 = Batch(id=f"BAT-{sku}-{wh_id}-A", sku=sku, warehouse_id=wh_id, quantity=curr_stock, reserved_quantity=0, mfg_date=today - timedelta(days=45), expiry_date=today + timedelta(days=685), status="ACTIVE")
+                    batches_to_add.append(b1)
+
+                status = "HEALTHY"
+                risk_level = "low"
+                doc = round(curr_stock / max(1.0, (prod["default_reorder_point"] * wh_weight / 10)), 1)
+
+            total_units_seeded += curr_stock
+            total_value_seeded += curr_stock * unit_cost
 
             inv = Inventory(
                 sku=sku,
@@ -386,16 +427,16 @@ async def seed_database(session: AsyncSession, force: bool = False):
                 current_stock=curr_stock,
                 reserved_stock=res_stock,
                 inbound_stock=inbound,
-                reorder_point=prod["default_reorder_point"],
-                safety_stock=prod["default_safety_stock"],
+                reorder_point=int(round(prod["default_reorder_point"] * wh_weight)),
+                safety_stock=int(round(prod["default_safety_stock"] * wh_weight)),
                 status=status,
                 risk_level=risk_level,
                 days_of_cover=doc,
                 last_recalculated_at=now_utc
             )
             inventory_to_add.append(inv)
-            
-            # Initial baseline transaction
+
+            # Baseline transaction receipt
             tx = InventoryTransaction(
                 transaction_type="RECEIPT",
                 sku=sku,
@@ -403,8 +444,8 @@ async def seed_database(session: AsyncSession, force: bool = False):
                 quantity=curr_stock,
                 previous_stock=0,
                 new_stock=curr_stock,
-                reference_id=f"INIT-{wh_id}-{sku}",
-                reason="Initial inventory load",
+                reference_id=f"INIT-STOCK-{wh_id}-{sku}",
+                reason="Initial baseline stock replenishment",
                 performed_by="System Seeder",
                 timestamp=now_utc - timedelta(days=10)
             )
@@ -414,358 +455,146 @@ async def seed_database(session: AsyncSession, force: bool = False):
     session.add_all(inventory_to_add)
     session.add_all(transactions_to_add)
     await session.flush()
+    print(f"[Seeder] Total live inventory: {total_units_seeded:,} units across {len(inventory_to_add)} nodes | Total Value: Rs. {total_value_seeded:,.2f} ({total_value_seeded/100000:.2f} Lakhs, Cap: <= Rs. 10 Lakh).")
 
-    print("[Seeder] Seeding 90 Days Historical Demand & Seasonal Events...")
-    # Seasonal Event: Flu Season
-    flu_event = SeasonalEvent(
-        name="Annual Flu Season Spike",
-        event_type="Seasonal",
-        start_date=today + timedelta(days=7),
-        end_date=today + timedelta(days=90),
-        impact_level="High",
-        expected_uplift_pct=60.0,
-        impacted_categories="Analgesics,Cough & Cold,Respiratory,Antibiotics",
-        impacted_region="All"
-    )
-    monsoon_event = SeasonalEvent(
-        name="Monsoon Vector Wave",
-        event_type="Seasonal",
-        start_date=today - timedelta(days=45),
-        end_date=today + timedelta(days=15),
-        impact_level="Medium",
-        expected_uplift_pct=25.0,
-        impacted_categories="Analgesics,Antibiotics,Gastro Care",
-        impacted_region="South,West"
-    )
-    festive_promo = Promotion(
-        name="Festive Health Pack Promotion",
-        sku="V-1122",
-        start_date=today + timedelta(days=12),
-        end_date=today + timedelta(days=22),
-        expected_uplift_pct=25.0,
-        discount_pct=15.0
-    )
-    session.add_all([flu_event, monsoon_event, festive_promo])
+    # 7. Seed Seasonal Events & Promotions
+    print("[Seeder] Seeding Seasonal Events & Promotions...")
+    seasonal_events = [
+        SeasonalEvent(
+            name="Annual Flu & Viral Infection Wave",
+            event_type="Seasonal",
+            start_date=today - timedelta(days=15),
+            end_date=today + timedelta(days=60),
+            impact_level="High",
+            expected_uplift_pct=50.0,
+            impacted_categories="Analgesics,Cough & Cold,Respiratory,Antibiotics",
+            impacted_region="All"
+        ),
+        SeasonalEvent(
+            name="Monsoon Vector & Gastro Illness Surge",
+            event_type="Seasonal",
+            start_date=today - timedelta(days=45),
+            end_date=today + timedelta(days=15),
+            impact_level="Medium",
+            expected_uplift_pct=25.0,
+            impacted_categories="Antibiotics,Gastro Care",
+            impacted_region="West,South,East"
+        ),
+        SeasonalEvent(
+            name="Winter Chronic Care Preventive Build",
+            event_type="Seasonal",
+            start_date=today + timedelta(days=30),
+            end_date=today + timedelta(days=120),
+            impact_level="Medium",
+            expected_uplift_pct=20.0,
+            impacted_categories="Diabetes Care,Cardiovascular,Vitamins",
+            impacted_region="North,East"
+        )
+    ]
+    promotions = [
+        Promotion(
+            name="Institutional Immunity Health Pack Promotion",
+            sku="V-1122",
+            start_date=today - timedelta(days=10),
+            end_date=today + timedelta(days=20),
+            expected_uplift_pct=25.0,
+            discount_pct=15.0
+        ),
+        Promotion(
+            name="Chronic Disease Adherence Campaign",
+            sku="M-5521",
+            start_date=today - timedelta(days=5),
+            end_date=today + timedelta(days=25),
+            expected_uplift_pct=20.0,
+            discount_pct=10.0
+        )
+    ]
+    session.add_all(seasonal_events)
+    session.add_all(promotions)
     await session.flush()
 
+    # 8. Seed 180 Days of Historical Demand Data for ML Training
+    print("[Seeder] Generating 180 Days of Synthetic Time-Series Demand History for ML training...")
     demand_records = []
-    for day_offset in range(90, 0, -1):
+    
+    # 180 days history: from (today - 180d) to (today - 1d)
+    for day_offset in range(180, 0, -1):
         record_date = today - timedelta(days=day_offset)
         dow = record_date.weekday()
-        # Day of week multiplier: higher Mon-Fri
-        dow_factor = 1.15 if dow in [0, 1, 2, 3, 4] else 0.80
+        # Day of week multiplier (Mon-Fri higher demand)
+        dow_factor = 1.12 if dow in [0, 1, 2, 3, 4] else (0.90 if dow == 5 else 0.75)
+        trend_factor = 1.0 + (180 - day_offset) * 0.0003  # slight gentle upward growth
 
         for prod in PRODUCTS_DATA:
             sku = prod["sku"]
-            base_rate = max(3.0, prod["default_reorder_point"] / 20.0)
-            
+            cat = prod["category"]
+            # Network daily base sales proportional to SKU total stock volume (~30 days turnover)
+            daily_base_network = max(2.0, prod["target_network_stock"] / 32.0)
+
             for wh in WAREHOUSES_DATA:
                 wh_id = wh["id"]
-                wh_factor = 1.3 if wh["tier"] == "Metro DC" else (0.9 if wh["tier"] == "Tier-1 DC" else 0.5)
-                # Apply recent surge for Flu Season items in Tier-2/Tier-1 DCs
-                surge = 1.45 if (prod["category"] in ["Analgesics", "Cough & Cold"] and day_offset <= 14 and wh_id in ["PAT-01", "DEL-02", "HYD-01"]) else 1.0
+                wh_factor = WH_DISTRIBUTION_WEIGHTS[wh_id]
                 
-                daily_demand = max(1, int(base_rate * wh_factor * dow_factor * surge * random.uniform(0.85, 1.15)))
+                # Check seasonal event uplifts
+                seasonal_boost = 1.0
+                if cat in ["Analgesics", "Cough & Cold", "Respiratory", "Antibiotics"] and day_offset <= 45:
+                    seasonal_boost += 0.45  # Flu surge
+                if cat in ["Antibiotics", "Gastro Care"] and (60 <= day_offset <= 120):
+                    seasonal_boost += 0.20  # Monsoon surge
+
+                # Random gaussian noise
+                noise = np.random.normal(1.0, 0.06)
+                daily_sales = max(1, int(round(daily_base_network * wh_factor * dow_factor * trend_factor * seasonal_boost * noise)))
+
+                # Unfulfilled demand for low stock periods
+                unfulfilled = 0
+                if sku == "P-1042" and wh_id == "PAT-01" and day_offset <= 7:
+                    unfulfilled = int(daily_sales * 0.20)
+                elif sku == "AZ-3391" and wh_id == "HYD-01" and day_offset <= 10:
+                    unfulfilled = int(daily_sales * 0.25)
+
                 dh = DemandHistory(
                     sku=sku,
                     warehouse_id=wh_id,
                     date=record_date,
-                    actual_sales=daily_demand,
-                    unfulfilled_demand=max(1, int(daily_demand * 0.2)) if (sku == "P-1042" and wh_id == "PAT-01" and day_offset <= 5) else 0,
-                    channel="Distributor",
+                    actual_sales=daily_sales,
+                    unfulfilled_demand=unfulfilled,
+                    channel="Hospital" if dow in [0, 2, 4] else "Distributor",
                     region=wh["region"]
                 )
                 demand_records.append(dh)
 
+    # Batch insert demand history
     session.add_all(demand_records)
     await session.flush()
+    print(f"[Seeder] Generated {len(demand_records):,} historical demand time-series records.")
 
-    print("[Seeder] Seeding Distributor Orders with Small Values...")
-    distributor_orders = [
-        DistributorOrder(
-            id="DO-2026-9901",
-            distributor_name="Apollo Pharmacy Network",
-            sku="P-1042",
-            warehouse_id="PAT-01",
-            region="East",
-            order_quantity=120,
-            order_date=today - timedelta(days=1),
-            required_date=today + timedelta(days=3),
-            priority="Critical",
-            status="PENDING"
-        ),
-        DistributorOrder(
-            id="DO-2026-9902",
-            distributor_name="MedPlus Health Services",
-            sku="C-5562",
-            warehouse_id="DEL-02",
-            region="North",
-            order_quantity=90,
-            order_date=today - timedelta(days=2),
-            required_date=today + timedelta(days=4),
-            priority="Urgent",
-            status="PENDING"
-        ),
-        DistributorOrder(
-            id="DO-2026-9903",
-            distributor_name="Fortis Healthcare Central",
-            sku="AZ-3391",
-            warehouse_id="DEL-02",
-            region="North",
-            order_quantity=60,
-            order_date=today - timedelta(days=1),
-            required_date=today + timedelta(days=2),
-            priority="Critical",
-            status="PENDING"
-        ),
-        DistributorOrder(
-            id="DO-2026-9904",
-            distributor_name="Wellness Forever Retail",
-            sku="IN-6620",
-            warehouse_id="MUM-01",
-            region="West",
-            order_quantity=30,
-            order_date=today - timedelta(days=1),
-            required_date=today + timedelta(days=5),
-            priority="Normal",
-            status="PENDING"
-        )
-    ]
-    session.add_all(distributor_orders)
-    await session.flush()
-
-    print("[Seeder] Seeding Initial Recommendations, Transfers, Alerts & Notifications...")
-    
-    # 1. Primary Recommendation: Flu Season Stockout on PAT-01 -> Transfer from MUM-01 near-expiry!
-    rec1 = ReplenishmentRecommendation(
-        id="REC-20260824-001",
-        sku="P-1042",
-        warehouse_id="PAT-01",
-        current_stock=25,
-        forecast_demand_30d=320.0,
-        safety_stock=100,
-        recommended_quantity=120,
-        recommended_frequency="Every 7 days (Surge Cadence)",
-        next_review_date=today + timedelta(days=7),
-        decision_type="TRANSFER",
-        preferred_source="MUM-01",
-        estimated_cost_inr=3000.0,
-        priority="critical",
-        reason_what="Transfer 120 units of Paracetamol 500mg from MUM-01 to PAT-01",
-        reason_why="PAT-01 has 3.2 days cover with +60% flu season surge. MUM-01 has 450 excess units expiring in 45 days.",
-        reason_when="Transfer immediately (dispatch today, arrival in 3 days).",
-        reason_impact="Eliminates immediate stockout risk in Tier-2 East DC and prevents ₹11.2K expiry write-off in MUM-01.",
-        status="PENDING",
-        requested_by="P1 Demand Sensing Engine"
-    )
-
-    rec2 = ReplenishmentRecommendation(
-        id="REC-20260824-002",
-        sku="P-1042",
-        warehouse_id="BLR-01",
-        current_stock=180,
-        forecast_demand_30d=260.0,
-        safety_stock=100,
-        recommended_quantity=150,
-        recommended_frequency="Every 14 days",
-        next_review_date=today + timedelta(days=14),
-        decision_type="REPLENISH",
-        preferred_source="SUPPLIER",
-        estimated_cost_inr=3750.0,
-        priority="critical",
-        reason_what="Procure 150 units from HealthGen Pharma",
-        reason_why="Stock is below reorder point (180 < 250) and forecast is trending upward.",
-        reason_when="Order within 24 hours.",
-        reason_impact="Restores safety stock cover to 22 days.",
-        status="PENDING",
-        requested_by="E1 Restock Engine"
-    )
-
-    rec3 = ReplenishmentRecommendation(
-        id="REC-20260824-003",
-        sku="I-7783",
-        warehouse_id="HYD-01",
-        current_stock=190,
-        forecast_demand_30d=240.0,
-        safety_stock=80,
-        recommended_quantity=100,
-        recommended_frequency="Every 14 days",
-        next_review_date=today + timedelta(days=14),
-        decision_type="REPLENISH",
-        preferred_source="SUPPLIER",
-        estimated_cost_inr=4500.0,
-        priority="critical",
-        reason_what="Procure 100 units of Ibuprofen 400mg",
-        reason_why="Projected stockout in 8 days with lead time of 4 days.",
-        reason_when="Issue PO within 24 hours.",
-        reason_impact="Prevents stockout in Hyderabad region.",
-        status="PENDING",
-        requested_by="E1 Restock Engine"
-    )
-    session.add_all([rec1, rec2, rec3])
-    await session.flush()
-
-    # Pre-calculated Transfer Candidate
-    trf1 = InventoryTransfer(
-        id="TRF-20260824-001",
-        sku="P-1042",
-        source_warehouse_id="MUM-01",
-        destination_warehouse_id="PAT-01",
-        batch_id="BAT-P-1042-MUM-01",
-        quantity=120,
-        available_at_source=450,
-        transfer_lead_time_days=3,
-        estimated_savings_inr=2800.0,
-        reason="FEFO expiry mitigation + Tier-2 flu surge stockout prevention",
-        status="RECOMMENDED"
-    )
-    session.add(trf1)
-    await session.flush()
-
-    # Seed Alerts with Small Numbers
-    alerts = [
-        Alert(
-            id="ALT-20260824-001",
-            alert_type="STOCKOUT_RISK",
-            severity="critical",
-            sku="P-1042",
-            product_name="Paracetamol 500mg",
-            warehouse_id="PAT-01",
-            detail="Projected stockout in 3.2 days based on sensed flu surge demand (Stock: 25 units).",
-            cause="Tier-2 demand spiked +62% while stock is at 25 units.",
-            recommended_action="Execute recommended transfer TRF-20260824-001 from MUM-01 (120 units).",
-            owner="Aditi Rao (SCM Planner)",
-            status="New",
-            escalation_level=1,
-            escalation_due_at=now_utc + timedelta(hours=4),
-            is_escalated=False
-        ),
-        Alert(
-            id="ALT-20260824-002",
-            alert_type="LOW_STOCK",
-            severity="critical",
-            sku="P-1042",
-            product_name="Paracetamol 500mg",
-            warehouse_id="BLR-01",
-            detail="Current stock (180) is below configured reorder point (250).",
-            cause="Regular consumption exceeded inbound receipts.",
-            recommended_action="Approve Purchase Order for 150 units from HealthGen Pharma.",
-            owner="Aditi Rao (SCM Planner)",
-            status="New",
-            escalation_level=1,
-            escalation_due_at=now_utc + timedelta(hours=4),
-            is_escalated=False
-        ),
-        Alert(
-            id="ALT-20260824-003",
-            alert_type="EXPIRY_RISK",
-            severity="warning",
-            sku="C-5562",
-            product_name="Cough Syrup 100ml",
-            warehouse_id="MUM-01",
-            detail="Batch BAT-C-5562-MUM-01 (140 units) will expire in 22 days.",
-            cause="Slow local dispensing in Mumbai DC.",
-            recommended_action="Expedite FEFO transfer to high-demand North DC (DEL-02).",
-            owner="Rohan Mehta (Warehouse Mgr)",
-            status="New",
-            escalation_level=2,
-            escalation_due_at=now_utc + timedelta(hours=24),
-            is_escalated=False
-        ),
-        Alert(
-            id="ALT-20260824-004",
-            alert_type="DEMAND_SURGE",
-            severity="warning",
-            sku="A-2381",
-            product_name="Amoxicillin 250mg",
-            warehouse_id="DEL-02",
-            detail="Demand sensed surge of +28% in the last 3 days.",
-            cause="Seasonal respiratory infection spike in Delhi NCR.",
-            recommended_action="Increase replenishment frequency from 14d to 7d.",
-            owner="Aditi Rao (SCM Planner)",
-            status="Acknowledged",
-            escalation_level=2,
-            escalation_due_at=now_utc + timedelta(hours=24),
-            is_escalated=False
-        ),
-        Alert(
-            id="ALT-20260824-005",
-            alert_type="STOCKOUT",
-            severity="critical",
-            sku="AZ-3391",
-            product_name="Azithromycin 500mg",
-            warehouse_id="HYD-01",
-            detail="Stock is completely depleted (0 units). Inbound PO of 50 units in transit.",
-            cause="Distributor backorders cleared remaining stock.",
-            recommended_action="Expedite delivery with MediSupplies Ltd.",
-            owner="Sara Iyer (Procurement Lead)",
-            status="New",
-            escalation_level=3,
-            escalation_due_at=now_utc + timedelta(hours=2),
-            is_escalated=True
-        )
-    ]
-    session.add_all(alerts)
-    await session.flush()
-
-    # Seed Notification Logs
-    notifications = [
-        NotificationLog(
-            alert_id="ALT-20260824-001",
-            channel="EMAIL",
-            recipient="aditi.rao@medcarepharma.com",
-            subject="[CRITICAL SCM ALERT] Paracetamol 500mg Stockout Imminent in PAT-01",
-            message_body="Demand surge detected. Available stock (25 units) covers only 3.2 days. Recommended action: Approve transfer from MUM-01 (120 units).",
-            status="SENT",
-            timestamp=now_utc - timedelta(minutes=45)
-        ),
-        NotificationLog(
-            alert_id="ALT-20260824-001",
-            channel="WHATSAPP",
-            recipient="+91-9876543210 (Aditi Rao)",
-            subject="MedCare Control Tower Alert",
-            message_body="🚨 *CRITICAL SCM ALERT*: Paracetamol 500mg at PAT-01 will stock out in 3.2 days (25 units left). 1-click approve transfer on Control Tower: https://controltower.medcare.com/replenishment",
-            status="DELIVERED",
-            timestamp=now_utc - timedelta(minutes=44)
-        ),
-        NotificationLog(
-            alert_id="ALT-20260824-003",
-            channel="SMS",
-            recipient="+91-9876543211 (Rohan Mehta)",
-            subject="Expiry Alert",
-            message_body="MedCare Alert: Batch BAT-C-5562-MUM-01 expires in 22 days (140 units). Review FEFO allocation.",
-            status="DELIVERED",
-            timestamp=now_utc - timedelta(minutes=30)
-        )
-    ]
-    session.add_all(notifications)
-    await session.flush()
-
-    # Seed Demand Signals
+    # 9. Seed Demand Signals (Multi-factor sensing overlays)
+    print("[Seeder] Seeding Live Demand Signals...")
     demand_signals = [
         DemandSignal(
-            id="SIG-FLU-PATNA-2026",
+            id="SIG-FLU-EAST-2026",
             sku="P-1042",
             warehouse_id="PAT-01",
             signal_type="SEASONALITY",
-            title="Seasonal Flu Wave Surge",
-            description="Epidemiological surveillance indicates +60% spike in viral fever & influenza across Bihar & Eastern UP.",
-            impact_pct=60.0,
+            title="Regional Flu & Viral Fever Outbreak",
+            description="Epidemiological hospital OPD trends show +50% surge in viral fever across Eastern territories.",
+            impact_pct=50.0,
             confidence_pct=94.0,
-            start_date=today - timedelta(days=7),
-            end_date=today + timedelta(days=28),
+            start_date=today - timedelta(days=10),
+            end_date=today + timedelta(days=35),
             is_active=True,
-            source="National Health Surveillance & Regional Hospital OPD Trends"
+            source="National Health Surveillance & OPD Registry"
         ),
         DemandSignal(
-            id="SIG-MONSOON-RESP-2026",
+            id="SIG-RESP-NORTH-2026",
             sku="C-5562",
-            warehouse_id="MUM-01",
+            warehouse_id="DEL-02",
             signal_type="WEATHER_EVENT",
             title="Monsoon Respiratory Wave",
-            description="Heavy rainfall patterns driving +40% increase in pediatric & adult cough formulations.",
+            description="High air humidity and rainfall driving +40% increase in prescription cough formulations.",
             impact_pct=40.0,
-            confidence_pct=88.0,
+            confidence_pct=89.0,
             start_date=today - timedelta(days=14),
             end_date=today + timedelta(days=21),
             is_active=True,
@@ -776,162 +605,35 @@ async def seed_database(session: AsyncSession, force: bool = False):
             sku="M-5521",
             warehouse_id="BLR-01",
             signal_type="PROMOTION",
-            title="Annual Chronic Care Adherence Campaign",
-            description="15% discount bundle on Metformin 500mg for retail pharmacy chains driving volume lift.",
+            title="Chronic Disease Adherence Campaign",
+            description="Institutional hospital network bulk ordering for diabetic adherence program.",
             impact_pct=25.0,
-            confidence_pct=91.0,
-            start_date=today - timedelta(days=3),
-            end_date=today + timedelta(days=30),
+            confidence_pct=92.0,
+            start_date=today - timedelta(days=5),
+            end_date=today + timedelta(days=25),
             is_active=True,
-            source="Commercial Sales Operations & Distributor Contracts"
+            source="Commercial Sales Operations"
         ),
         DemandSignal(
-            id="SIG-HOLIDAY-DIWALI-2026",
+            id="SIG-ANTIBIOTIC-WEST-2026",
             sku="A-2381",
-            warehouse_id="DEL-02",
+            warehouse_id="MUM-01",
             signal_type="HOLIDAY",
             title="Pre-Festive Stock Build",
-            description="Hospital networks stockpiling 2 weeks of essential antibiotics ahead of regional transport shutdowns.",
-            impact_pct=35.0,
-            confidence_pct=86.0,
+            description="Hospital networks stockpiling 2 weeks of essential broad-spectrum antibiotics.",
+            impact_pct=30.0,
+            confidence_pct=87.0,
             start_date=today + timedelta(days=7),
             end_date=today + timedelta(days=21),
             is_active=True,
             source="Institutional Hospital Procurement Calendar"
-        ),
-        DemandSignal(
-            id="SIG-STOCKOUT-HIST-2026",
-            sku="AZ-3391",
-            warehouse_id="HYD-01",
-            signal_type="STOCKOUT_HISTORY",
-            title="Unfulfilled Demand Velocity Rebound",
-            description="Historical stockout in HYD-01 created backorder queue of 75 units releasing upon receipt.",
-            impact_pct=45.0,
-            confidence_pct=96.0,
-            start_date=today - timedelta(days=10),
-            end_date=today + timedelta(days=15),
-            is_active=True,
-            source="Distributor Backorder Ledger"
-        ),
-        DemandSignal(
-            id="SIG-PRICE-REVISION-2026",
-            sku="V-1122",
-            warehouse_id="CHE-01",
-            signal_type="PRICE_CHANGE",
-            title="GST Rate Rationalization Impact",
-            description="5% retail price reduction boosting institutional wellness clinic procurement.",
-            impact_pct=15.0,
-            confidence_pct=82.0,
-            start_date=today - timedelta(days=30),
-            end_date=today + timedelta(days=60),
-            is_active=True,
-            source="Regulatory Pricing Authority & SCM Billing"
         )
     ]
     session.add_all(demand_signals)
     await session.flush()
 
-    # Seed Escalations
-    escalations = [
-        AlertEscalation(
-            id="ESC-20260824-001",
-            alert_id="ALT-20260824-001",
-            from_level=1,
-            to_level=2,
-            assigned_to="Rajesh Sharma (Regional SCM Director - East)",
-            reason="Tier-2 DC PAT-01 stockout imminent in 3.2 days under +60% flu surge. Stock is down to 25 units.",
-            action_taken="Expedited inter-DC stock balancing transfer from Mumbai DC (MUM-01) scheduled for dispatch (120 units).",
-            sla_deadline=now_utc + timedelta(hours=4),
-            escalated_at=now_utc - timedelta(minutes=40),
-            status="IN_PROGRESS"
-        ),
-        AlertEscalation(
-            id="ESC-20260824-002",
-            alert_id="ALT-20260824-005",
-            from_level=2,
-            to_level=3,
-            assigned_to="Dr. Vikram Malhotra (VP Global Supply Chain)",
-            reason="Complete stockout of critical antibiotic Azithromycin (AZ-3391) at Hyderabad DC. Supplier lead-time delayed by 2 days.",
-            action_taken="Emergency procurement override issued to MediSupplies Ltd with air courier dispatch (50 units).",
-            sla_deadline=now_utc + timedelta(hours=2),
-            escalated_at=now_utc - timedelta(minutes=25),
-            status="IN_PROGRESS"
-        ),
-        AlertEscalation(
-            id="ESC-20260824-003",
-            alert_id="ALT-20260824-003",
-            from_level=1,
-            to_level=2,
-            assigned_to="Priya Nair (QA & FEFO Regulatory Manager)",
-            reason="Batch BAT-C-5562-MUM-01 with 140 units expires in 22 days. Requires immediate FEFO allocation.",
-            action_taken="Authorized promotional markdown and expedited routing to Delhi NCR DC (DEL-02).",
-            sla_deadline=now_utc + timedelta(hours=8),
-            escalated_at=now_utc - timedelta(minutes=15),
-            status="RESOLVED"
-        )
-    ]
-    session.add_all(escalations)
-    await session.flush()
-
-    # Seed Sales Orders with Small Values
-    sales_orders = [
-        SalesOrder(
-            id="SO-20260824-001",
-            order_number="ORD-HOSP-9901",
-            sku="P-1042",
-            warehouse_id="MUM-01",
-            quantity=40,
-            unit_price=25.0,
-            total_price=1000.0,
-            customer_name="Apollo Hospitals Mumbai",
-            channel="Hospital",
-            status="COMPLETED",
-            created_at=now_utc - timedelta(hours=3)
-        ),
-        SalesOrder(
-            id="SO-20260824-002",
-            order_number="ORD-DIST-8842",
-            sku="A-2381",
-            warehouse_id="DEL-02",
-            quantity=25,
-            unit_price=65.0,
-            total_price=1625.0,
-            customer_name="Fortis Healthcare Delhi",
-            channel="Hospital",
-            status="COMPLETED",
-            created_at=now_utc - timedelta(hours=5)
-        ),
-        SalesOrder(
-            id="SO-20260824-003",
-            order_number="ORD-RETL-7721",
-            sku="C-5562",
-            warehouse_id="BLR-01",
-            quantity=20,
-            unit_price=75.0,
-            total_price=1500.0,
-            customer_name="MedPlus Pharmacy Retail",
-            channel="Retail Pharmacy",
-            status="COMPLETED",
-            created_at=now_utc - timedelta(hours=6)
-        ),
-        SalesOrder(
-            id="SO-20260824-004",
-            order_number="ORD-HOSP-6632",
-            sku="M-5521",
-            warehouse_id="HYD-01",
-            quantity=50,
-            unit_price=30.0,
-            total_price=1500.0,
-            customer_name="Max Super Speciality Hospital",
-            channel="Hospital",
-            status="COMPLETED",
-            created_at=now_utc - timedelta(hours=8)
-        )
-    ]
-    session.add_all(sales_orders)
-    await session.flush()
-
-    # Seed System Settings
+    # 10. Seed Initial System Settings
+    print("[Seeder] Seeding SCM System Settings...")
     settings_entries = [
         SystemSetting(key="service_level_pct", category="Inventory", value="95", description="Target customer service level percentage"),
         SystemSetting(key="safety_stock_method", category="Inventory", value="Service Level Based (95%)", description="Safety stock calculation model"),
@@ -940,15 +642,112 @@ async def seed_database(session: AsyncSession, force: bool = False):
         SystemSetting(key="expiry_at_risk_days", category="Inventory", value="90", description="Days threshold for at-risk expiry"),
         SystemSetting(key="expiry_watch_days", category="Inventory", value="180", description="Days threshold for watch expiry"),
         SystemSetting(key="forecast_horizon_days", category="Demand", value="30", description="Standard planning forecast horizon in days"),
-        SystemSetting(key="forecast_model", category="Demand", value="Prophet (Holiday + Seasonality) + Sensed Velocity", description="Active ML demand sensing algorithm"),
+        SystemSetting(key="forecast_model", category="Demand", value="RandomForestRegressor (Multi-Signal Sensing)", description="Active ML demand sensing algorithm"),
         SystemSetting(key="lead_time_buffer_days", category="Replenishment", value="2", description="Buffer added to supplier lead times"),
-        SystemSetting(key="auto_approve_threshold_inr", category="Replenishment", value="10000", description="Automatic replenishment PO approval threshold in INR"),
-        SystemSetting(key="manager_approval_threshold_inr", category="Replenishment", value="50000", description="Manager sign-off threshold in INR"),
+        SystemSetting(key="auto_approve_threshold_inr", category="Replenishment", value="100000", description="Automatic replenishment PO approval threshold in INR"),
+        SystemSetting(key="manager_approval_threshold_inr", category="Replenishment", value="500000", description="Manager sign-off threshold in INR"),
         SystemSetting(key="transfer_first_policy", category="Replenishment", value="Enabled", description="Always evaluate feasible network transfers before new procurement")
     ]
     session.add_all(settings_entries)
+    await session.flush()
+
+    # 11. Seed Initial Active Inter-DC Transfer Recommendation (FEFO Near-Expiry MUM-01 -> PAT-01)
+    trf1 = InventoryTransfer(
+        id="TRF-P-1042-MUM-01-PAT-01-20260824",
+        sku="P-1042",
+        source_warehouse_id="MUM-01",
+        destination_warehouse_id="PAT-01",
+        batch_id="BAT-P-1042-MUM-01-EXP",
+        quantity=100,
+        available_at_source=200,
+        transfer_lead_time_days=3,
+        estimated_savings_inr=2500.0,
+        reason="FEFO expiry mitigation: Transfer near-expiry batch (45d) from Mumbai Mother DC to high-demand Patna Regional DC",
+        status="RECOMMENDED"
+    )
+    session.add(trf1)
+
+    rec1 = ReplenishmentRecommendation(
+        id="REC-20260824-001",
+        sku="P-1042",
+        warehouse_id="PAT-01",
+        current_stock=25,
+        forecast_demand_30d=450.0,
+        safety_stock=30,
+        recommended_quantity=100,
+        recommended_frequency="Every 7 days (Surge Cadence)",
+        next_review_date=today + timedelta(days=7),
+        decision_type="TRANSFER",
+        preferred_source="MUM-01",
+        estimated_cost_inr=2500.0,
+        priority="critical",
+        reason_what="Transfer 100 units of Paracetamol 500mg from MUM-01 to PAT-01",
+        reason_why="PAT-01 has surging flu demand (25 units remaining). MUM-01 has 200 units expiring in 45 days.",
+        reason_when="Transfer immediately (dispatch today, arrival in 3 days).",
+        reason_impact="Eliminates immediate stockout risk in East DC and prevents expiry write-off in MUM-01.",
+        status="PENDING",
+        requested_by="P1 Demand Sensing Engine"
+    )
+    rec2 = ReplenishmentRecommendation(
+        id="REC-20260824-002",
+        sku="AZ-3391",
+        warehouse_id="HYD-01",
+        current_stock=18,
+        forecast_demand_30d=65.0,
+        safety_stock=4,
+        recommended_quantity=50,
+        recommended_frequency="Every 14 days",
+        next_review_date=today + timedelta(days=14),
+        decision_type="REPLENISH",
+        preferred_source="Cipla Healthcare",
+        estimated_cost_inr=6000.0,
+        priority="critical",
+        reason_what="Procure 50 units from Cipla Healthcare",
+        reason_why="Stock is below reorder point (18 units vs ROP 10) and demand is trending upward.",
+        reason_when="Order within 24 hours.",
+        reason_impact="Restores safety stock cover to 25 days.",
+        status="PENDING",
+        requested_by="E1 Restock Engine"
+    )
+    session.add_all([rec1, rec2])
+
+    # Initial Alerts
+    alert1 = Alert(
+        id="ALT-20260824-001",
+        alert_type="STOCKOUT_RISK",
+        severity="critical",
+        sku="P-1042",
+        product_name="Paracetamol 500mg",
+        warehouse_id="PAT-01",
+        detail="Projected stockout in 2.5 days based on sensed flu surge demand in East DC.",
+        cause="Eastern territory demand spiked +50% under seasonal outbreak.",
+        recommended_action="Execute recommended transfer TRF-P-1042-MUM-01-PAT-01-20260824 from MUM-01 (100 units).",
+        owner="Dr. Aditi Rao (SCM Lead)",
+        status="New",
+        escalation_level=1,
+        escalation_due_at=now_utc + timedelta(hours=4),
+        is_escalated=False
+    )
+    alert2 = Alert(
+        id="ALT-20260824-002",
+        alert_type="EXPIRY_RISK",
+        severity="warning",
+        sku="C-5562",
+        product_name="Cough Syrup 100ml",
+        warehouse_id="MUM-01",
+        detail="Batch BAT-C-5562-MUM-01-EXP (60 bottles) expires in 30 days.",
+        cause="Local consumption velocity in Mumbai Mother DC is lower than batch allocation.",
+        recommended_action="Expedite FEFO transfer to Delhi NCR DC (DEL-02).",
+        owner="Rohan Mehta (Warehouse Mgr)",
+        status="New",
+        escalation_level=2,
+        escalation_due_at=now_utc + timedelta(hours=24),
+        is_escalated=False
+    )
+    session.add_all([alert1, alert2])
+
     await session.commit()
-    print("[Seeder] Database successfully populated with realistic MedCare Pharma data (small values)!")
+    print("[Seeder] Database reset and re-seed with clean synthetic dataset (Stock Value <= Rs. 10 Lakh) completed successfully!")
 
 
 async def reset_and_seed_db():
@@ -959,4 +758,3 @@ async def reset_and_seed_db():
 
 if __name__ == "__main__":
     asyncio.run(reset_and_seed_db())
-

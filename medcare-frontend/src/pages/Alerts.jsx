@@ -251,18 +251,19 @@ export default function Alerts() {
           {/* Alerts by Type Breakdown Pie Chart */}
           <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
             <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">Alerts by Root Cause</h3>
-            <div className="h-44">
+            <div className="w-full h-48 min-h-[190px]">
               {alerts_by_type && alerts_by_type.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
+                  <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                     <Pie
                       data={alerts_by_type}
                       dataKey="value"
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      outerRadius={65}
-                      innerRadius={35}
+                      outerRadius={70}
+                      innerRadius={38}
+                      paddingAngle={2}
                     >
                       {alerts_by_type.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color || '#177A5B'} />
@@ -277,28 +278,30 @@ export default function Alerts() {
                 </div>
               )}
             </div>
-            <div className="space-y-1.5 text-[11.5px] mt-2">
-              {alerts_by_type.map((item, i) => (
-                <div key={i} className="flex items-center justify-between text-ink-700">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span>{item.name}</span>
+            {alerts_by_type && alerts_by_type.length > 0 && (
+              <div className="space-y-1.5 text-[11.5px] mt-3 border-t border-ink-100 pt-2.5">
+                {alerts_by_type.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between text-ink-700">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                      <span>{item.name}</span>
+                    </div>
+                    <span className="font-semibold text-ink-900">{item.value}</span>
                   </div>
-                  <span className="font-semibold text-ink-900">{item.value}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* SLA Escalation Log */}
           <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
             <h3 className="text-[14.5px] font-bold text-ink-900 mb-3 flex items-center gap-1.5">
-              <Clock size={15} className="text-forest-700" /> Recent Escalation Activity (Live DB)
+              <Clock size={15} className="text-forest-700" /> Recent Escalation Activity
             </h3>
             <div className="space-y-2 text-[11.5px]">
               {recent_activity.length > 0 ? (
                 recent_activity.map((act, i) => (
-                  <div key={i} className="p-2.5 rounded bg-cream-100/60 border border-ink-100 space-y-1">
+                  <div key={act.id || i} className="p-2.5 rounded bg-cream-100/60 border border-ink-100 space-y-1">
                     <div className="flex justify-between items-center">
                       <span className="font-semibold text-ink-900">{act.text}</span>
                       <span className="text-ink-400 font-mono text-[10.5px]">{act.time}</span>
@@ -309,7 +312,7 @@ export default function Alerts() {
                   </div>
                 ))
               ) : (
-                <p className="text-ink-400 text-[12px]">No recent escalation events logged.</p>
+                <p className="text-ink-400 text-[12px]">No recent escalation events logged in database.</p>
               )}
             </div>
           </div>

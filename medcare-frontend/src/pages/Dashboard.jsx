@@ -64,6 +64,9 @@ export default function Dashboard() {
       }, 3000);
     } catch (err) {
       setActionError(`Action execution failed: ${err.message}`);
+      // Refresh dashboard state immediately so stale/invalid card is dynamically replaced
+      triggerRefresh();
+      await loadDashboard();
     } finally {
       setTransferExecuting(false);
     }
@@ -116,14 +119,14 @@ export default function Dashboard() {
           delta="Dynamic lead-time threshold"
           deltaPositive={false}
         />
-        <StatCard
+        {/* <StatCard
           icon={ShieldAlert}
           tone="sage"
           label="Network Inventory Health"
           value={kpis.inventory_health || '100%'}
           delta={selectedWarehouse === 'All' ? '3 Active DC Nodes' : `${selectedWarehouse} DC Node`}
           deltaPositive={true}
-        />
+        /> */}
       </div>
 
       {/* Main Grid: Demand Outlook Chart & Recommended Action */}
