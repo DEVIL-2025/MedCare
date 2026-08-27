@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     # Database Configuration
     DATABASE_URL: Optional[str] = None
+    DATABASE_URL_UNPOOLED: Optional[str] = None
     DB_HOST: Optional[str] = None
     DB_PORT: int = 5432
     DB_NAME: Optional[str] = None
@@ -21,23 +22,32 @@ class Settings(BaseSettings):
     DB_PASSWORD: Optional[str] = None
     DB_SCHEMA: str = "public"
 
+    # Neon Cloud Backend Primitives
+    NEON_PROJECT_ID: Optional[str] = "wispy-poetry-14541559"
+    NEON_ORG_ID: Optional[str] = "org-morning-sound-68167997"
+    NEON_AUTH_BASE_URL: Optional[str] = None
+    NEON_AI_GATEWAY_URL: Optional[str] = None
+    NEON_AI_GATEWAY_API_KEY: Optional[str] = None
+    AWS_ENDPOINT_URL_S3: Optional[str] = None
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_REGION: Optional[str] = "us-east-2"
+    AWS_S3_BUCKET: Optional[str] = None
+
     @property
     def sync_database_url(self) -> str:
-        if self.DB_HOST and self.DB_USER and self.DB_NAME:
-            pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
-            return f"postgresql://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         if self.DATABASE_URL:
             url = self.DATABASE_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql://", 1)
             return url
+        if self.DB_HOST and self.DB_USER and self.DB_NAME:
+            pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
+            return f"postgresql://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         return "sqlite:///./medcare_scm.db"
 
     @property
     def async_database_url(self) -> str:
-        if self.DB_HOST and self.DB_USER and self.DB_NAME:
-            pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
-            return f"postgresql+asyncpg://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         if self.DATABASE_URL:
             url = self.DATABASE_URL
             if url.startswith("postgres://"):
@@ -45,6 +55,9 @@ class Settings(BaseSettings):
             elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
                 url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
             return url
+        if self.DB_HOST and self.DB_USER and self.DB_NAME:
+            pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
+            return f"postgresql+asyncpg://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         return "sqlite+aiosqlite:///./medcare_scm.db"
     
     @property

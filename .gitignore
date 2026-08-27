@@ -1,6 +1,7 @@
 # Environment & Secrets
 .env
 .env.*
+.neon
 !.env.example
 !.env.production.example
 !.env.free-tier.example
