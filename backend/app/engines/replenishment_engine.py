@@ -87,11 +87,17 @@ class ReplenishmentEngine:
             rec_key = f"{inv.sku}_{inv.warehouse_id}"
             existing_rec = existing_recs_map.get(rec_key)
 
-            if net_shortfall <= 0 and inv.current_stock >= inv.reorder_point:
+            if net_shortfall <= 0:
                 if existing_rec is not None and existing_rec.status == "PENDING":
                     existing_rec.status = "RESOLVED"
                     doc_disp = f"{round(inv.current_stock / daily_sensed, 1)} days of cover" if daily_sensed > 0 else "N/A"
-                    existing_rec.reason_impact = f"Resolved: Stock restored to {inv.current_stock:,} units ({doc_disp})."
+                    if inv.inbound_stock > 0:
+                        existing_rec.reason_impact = (
+                            f"Resolved: {inv.inbound_stock:,} units already inbound covers the shortfall. "
+                            f"Current stock {inv.current_stock:,} units ({doc_disp})."
+                        )
+                    else:
+                        existing_rec.reason_impact = f"Resolved: Stock restored to {inv.current_stock:,} units ({doc_disp})."
                 continue
 
             # Recommended Quantity = max(0, Target Stock - Effective Inventory)
@@ -100,6 +106,17 @@ class ReplenishmentEngine:
                 recommended_qty = max(prod.moq, int((raw_recommended_qty + prod.moq - 1) // prod.moq * prod.moq))
             else:
                 recommended_qty = raw_recommended_qty
+
+            # If quantity resolves to 0 (e.g. inbound covers gap but stock still below ROP), resolve and skip
+            if recommended_qty == 0:
+                if existing_rec is not None and existing_rec.status == "PENDING":
+                    existing_rec.status = "RESOLVED"
+                    doc_disp = f"{round(inv.current_stock / daily_sensed, 1)} days of cover" if daily_sensed > 0 else "N/A"
+                    existing_rec.reason_impact = (
+                        f"Resolved: Inbound stock covers the shortfall. "
+                        f"Current stock {inv.current_stock:,} units ({doc_disp})."
+                    )
+                continue
 
             doc = (inv.available_stock / daily_sensed) if daily_sensed > 0 else float("inf")
             doc_str = f"{round(doc, 1)}d" if doc != float("inf") else "N/A"
