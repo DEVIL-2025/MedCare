@@ -26,7 +26,7 @@ export default function Sidebar({ isAiAssistantOpen, onToggleAiAssistant }) {
 
   return (
     <aside className="w-60 bg-forest-900 text-cream-100 flex flex-col shrink-0">
-      <div
+        <div
         onClick={() => window.location.reload()}
         className="flex items-center gap-2.5 px-5 py-5 border-b border-white/10 cursor-pointer select-none"
       >
