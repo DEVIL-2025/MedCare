@@ -147,6 +147,17 @@ export const api = {
       method: 'DELETE',
       ...options,
     }),
+  updateInventoryConfig: (warehouseId, sku, data, options) =>
+    request(`/inventory/${encodeURIComponent(warehouseId)}/${encodeURIComponent(sku)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+      ...options,
+    }),
+  deleteWarehouseInventory: (warehouseId, sku, options) =>
+    request(`/inventory/${encodeURIComponent(warehouseId)}/${encodeURIComponent(sku)}`, {
+      method: 'DELETE',
+      ...options,
+    }),
   recordSale: (data, options) =>
     request('/inventory/sales', {
       method: 'POST',

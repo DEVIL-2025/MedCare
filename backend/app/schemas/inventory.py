@@ -46,6 +46,14 @@ class SaleCreate(BaseModel):
     reason: Optional[str] = None
 
 
+class InventoryConfigUpdate(BaseModel):
+    reorder_point: Optional[int] = Field(None, ge=0, description="Warehouse-specific Reorder Point")
+    safety_stock: Optional[int] = Field(None, ge=0, description="Warehouse-specific Safety Stock buffer")
+    unit_cost: Optional[float] = Field(None, gt=0, description="Product price / unit cost in INR")
+    moq: Optional[int] = Field(None, ge=1, description="Minimum order quantity")
+    current_stock: Optional[int] = Field(None, ge=0, description="Physical stock count override")
+
+
 class InventoryBase(BaseModel):
     sku: str
     warehouse_id: str
@@ -68,6 +76,7 @@ class InventoryResponse(InventoryBase):
     category: Optional[str] = None
     unit: Optional[str] = "Units"
     unit_cost: Optional[float] = 50.0
+    moq: Optional[int] = 1000
     expiry: Optional[str] = "-"
     last_recalculated_at: Optional[datetime] = None
 

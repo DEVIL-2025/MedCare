@@ -16,6 +16,7 @@ from backend.app.models import (
     User, Role, Permission, RolePermission, AuditLog, Supplier
 )
 from backend.app.services.auth_service import AuthService
+from backend.app.engines.inventory_engine import InventoryEngine
 
 PERMISSIONS_DATA = [
     # Dashboard
@@ -393,7 +394,7 @@ async def seed_database(session: AsyncSession, force: bool = False):
                 doc = 28.0
 
             elif sku == "AZ-3391" and wh_id == "HYD-01":
-                curr_stock = int(node_target_stock * 0.35)
+                curr_stock = 8
                 inbound = 30
                 b1 = Batch(id=f"BAT-{sku}-HYD-01", sku=sku, warehouse_id=wh_id, quantity=curr_stock, reserved_quantity=0, mfg_date=today - timedelta(days=90), expiry_date=today + timedelta(days=640), status="ACTIVE")
                 batches_to_add.append(b1)
@@ -412,7 +413,7 @@ async def seed_database(session: AsyncSession, force: bool = False):
                     batches_to_add.extend([b1, b2])
                 else:
                     b1 = Batch(id=f"BAT-{sku}-{wh_id}-A", sku=sku, warehouse_id=wh_id, quantity=curr_stock, reserved_quantity=0, mfg_date=today - timedelta(days=45), expiry_date=today + timedelta(days=685), status="ACTIVE")
-                    batches_to_add.append(b1)
+                    batches_to_add.extend([b1, b2])
 
                 status = "HEALTHY"
                 risk_level = "low"
@@ -421,16 +422,20 @@ async def seed_database(session: AsyncSession, force: bool = False):
             total_units_seeded += curr_stock
             total_value_seeded += curr_stock * unit_cost
 
+            node_rop = int(round(prod["default_reorder_point"] * wh_weight))
+            node_ss = int(round(prod["default_safety_stock"] * wh_weight))
+            dyn_status, dyn_risk = InventoryEngine.evaluate_inventory_status(curr_stock, node_rop, node_ss)
+
             inv = Inventory(
                 sku=sku,
                 warehouse_id=wh_id,
                 current_stock=curr_stock,
                 reserved_stock=res_stock,
                 inbound_stock=inbound,
-                reorder_point=int(round(prod["default_reorder_point"] * wh_weight)),
-                safety_stock=int(round(prod["default_safety_stock"] * wh_weight)),
-                status=status,
-                risk_level=risk_level,
+                reorder_point=node_rop,
+                safety_stock=node_ss,
+                status=dyn_status,
+                risk_level=dyn_risk,
                 days_of_cover=doc,
                 last_recalculated_at=now_utc
             )

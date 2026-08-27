@@ -196,7 +196,7 @@ export default function Settings() {
         category: suppCategory.trim() || undefined,
         status: 'Active'
       });
-      setSuppActionSuccess(`Supplier '${suppName.trim()}' added to PostgreSQL successfully!`);
+      setSuppActionSuccess(`Supplier '${suppName.trim()}' added to Database successfully!`);
       setSuppName('');
       setSuppEmail('');
       setSuppPhone('');
@@ -221,7 +221,7 @@ export default function Settings() {
     setSuppActionSuccess(null);
     try {
       await api.deleteSupplier(supplierId);
-      setSuppActionSuccess(`Supplier '${supplierName}' removed from PostgreSQL.`);
+      setSuppActionSuccess(`Supplier '${supplierName}' removed from Database.`);
       await loadSuppliers();
       triggerRefresh();
       setTimeout(() => setSuppActionSuccess(null), 3000);
@@ -231,7 +231,7 @@ export default function Settings() {
   }
 
   if (loading && !data) {
-    return <LoadingState message="Loading system configuration parameters from PostgreSQL..." />;
+    return <LoadingState message="Loading system configuration parameters from Database..." />;
   }
 
   if (error && !data) {
@@ -252,7 +252,7 @@ export default function Settings() {
       {saveSuccess && (
         <div className="p-3 bg-forest-100 border border-forest-600/30 text-forest-900 text-[12.5px] rounded-lg font-medium flex items-center gap-2">
           <Check size={16} className="text-forest-700" />
-          Settings successfully updated and persisted to PostgreSQL!
+          Settings successfully updated and persisted to Database!
         </div>
       )}
 
@@ -353,7 +353,7 @@ export default function Settings() {
                   className="flex items-center gap-1.5 px-4 py-2 bg-forest-700 hover:bg-forest-600 text-white rounded text-[12.5px] font-semibold transition-colors shadow-sm cursor-pointer disabled:opacity-50"
                 >
                   <Save size={14} />
-                  <span>{saving ? 'Persisting to PostgreSQL...' : 'Save Parameters'}</span>
+                  <span>{saving ? 'Persisting to Database...' : 'Save Parameters'}</span>
                 </button>
               </div>
             </form>
@@ -526,7 +526,7 @@ export default function Settings() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h4 className="font-bold text-ink-900">Execute Dynamic Low-Stock Scan (Consolidated Digest)</h4>
-                    <p className="text-[11.5px] text-ink-500">Scans all SKU-DC nodes in PostgreSQL and dispatches a single consolidated digest email.</p>
+                    <p className="text-[11.5px] text-ink-500">Scans all SKU-DC nodes in Database and dispatches a single consolidated digest email.</p>
                   </div>
                   <button
                     type="button"
@@ -603,7 +603,7 @@ export default function Settings() {
                 </div>
                 {emailLogs.length === 0 ? (
                   <div className="p-4 bg-white rounded border border-ink-100 text-center text-ink-400 text-[12px]">
-                    No email notifications logged in PostgreSQL yet. Run a check above to test.
+                    No email notifications logged in Database yet. Run a check above to test.
                   </div>
                 ) : (
                   <div className="overflow-x-auto border border-ink-100 rounded-lg">
@@ -650,7 +650,7 @@ export default function Settings() {
                   <h3 className="text-[15px] font-bold text-ink-900 flex items-center gap-1.5">
                     <Truck size={16} className="text-forest-700" /> Pharmaceutical Supplier Directory
                   </h3>
-                  <p className="text-[11.5px] text-ink-500">Add, configure, and remove authorized medicine manufacturers & logistics vendors in PostgreSQL.</p>
+                  <p className="text-[11.5px] text-ink-500">Add, configure, and remove authorized medicine manufacturers & logistics vendors in Database.</p>
                 </div>
                 <span className="text-[11px] bg-forest-100 text-forest-900 px-2.5 py-0.5 rounded font-bold self-start sm:self-auto">
                   {suppliers.length} Registered {suppliers.length === 1 ? 'Supplier' : 'Suppliers'}
@@ -738,7 +738,7 @@ export default function Settings() {
                     className="flex items-center gap-1.5 px-3.5 py-1.5 bg-forest-700 hover:bg-forest-600 text-white rounded text-[12px] font-semibold transition-colors shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     <Plus size={14} />
-                    <span>{addingSupplier ? 'Registering...' : 'Register Supplier in PostgreSQL'}</span>
+                    <span>{addingSupplier ? 'Registering...' : 'Register Supplier in Database'}</span>
                   </button>
                 </div>
               </form>
@@ -871,7 +871,7 @@ export default function Settings() {
               <div className="p-3 bg-cream-100 rounded border border-ink-100 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-ink-500">Database Engine:</span>
-                  <span className="font-mono font-semibold text-ink-900">PostgreSQL / SQLite via Async SQLAlchemy</span>
+                  <span className="font-mono font-semibold text-ink-900">PostgreSQL (Neon Lakebase) via Async SQLAlchemy + asyncpg</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-ink-500">Backend Framework:</span>

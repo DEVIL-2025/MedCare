@@ -163,3 +163,183 @@ async def test_add_and_get_warehouse():
         await session.execute(sql_delete(Warehouse).where(Warehouse.id == "TEST-WH-01"))
         await session.commit()
 
+
+@pytest.mark.asyncio
+async def test_update_inventory_config_warehouse_specific():
+    from backend.app.database import AsyncSessionLocal
+    from backend.app.routers.inventory import add_product, update_inventory_config, delete_product
+    from backend.app.schemas.inventory import ProductCreate, InventoryConfigUpdate
+    from backend.app.models.inventory import Inventory
+    from backend.app.models.product import Product
+    from backend.app.models.auth import User
+    from sqlalchemy import select
+
+    admin_user = User(id="USR-ADMIN-TEST", role_id="ADMIN", is_active=True)
+
+    async with AsyncSessionLocal() as session:
+        # Create test product
+        create_payload = ProductCreate(
+            sku="TEST-CONFIG-001",
+            name="Config Test Drug",
+            category="Antibiotics",
+            criticality="High",
+            unit="Vials",
+            shelf_life_days=730,
+            default_reorder_point=200,
+            default_safety_stock=80,
+            moq=50,
+            unit_cost=100.0,
+            initial_stock=300,
+            initial_warehouse_id="MUM-01"
+        )
+        await add_product(payload=create_payload, current_user=admin_user, db=session)
+
+        # Update MUM-01 specific inventory settings
+        update_mum = InventoryConfigUpdate(
+            reorder_point=450,
+            safety_stock=180,
+            unit_cost=125.50,
+            moq=100
+        )
+        res_mum = await update_inventory_config(
+            warehouse_id="MUM-01",
+            sku="TEST-CONFIG-001",
+            payload=update_mum,
+            current_user=admin_user,
+            db=session
+        )
+        assert res_mum["success"] is True
+        assert res_mum["reorderPoint"] == 450
+        assert res_mum["safetyStock"] == 180
+        assert res_mum["unitCost"] == 125.50
+
+        # Verify MUM-01 in DB
+        inv_mum = (await session.execute(
+            select(Inventory).where(Inventory.sku == "TEST-CONFIG-001", Inventory.warehouse_id == "MUM-01")
+        )).scalars().first()
+        assert inv_mum.reorder_point == 450
+        assert inv_mum.safety_stock == 180
+
+        # Verify DEL-02 in DB is isolated and retains default ROP
+        inv_del = (await session.execute(
+            select(Inventory).where(Inventory.sku == "TEST-CONFIG-001", Inventory.warehouse_id == "DEL-02")
+        )).scalars().first()
+        assert inv_del.reorder_point == 200
+        assert inv_del.safety_stock == 80
+
+        # Clean up
+        await delete_product(sku="TEST-CONFIG-001", current_user=admin_user, db=session)
+
+
+@pytest.mark.asyncio
+async def test_delete_warehouse_inventory_preserves_product():
+    from backend.app.database import AsyncSessionLocal
+    from backend.app.routers.inventory import add_product, delete_warehouse_inventory, delete_product
+    from backend.app.schemas.inventory import ProductCreate
+    from backend.app.models.inventory import Inventory
+    from backend.app.models.product import Product
+    from backend.app.models.auth import User
+    from sqlalchemy import select
+
+    admin_user = User(id="USR-ADMIN-TEST", role_id="ADMIN", is_active=True)
+
+    async with AsyncSessionLocal() as session:
+        # Create test product
+        create_payload = ProductCreate(
+            sku="TEST-DEL-WH-002",
+            name="Warehouse Deletion Test Drug",
+            category="Analgesics",
+            criticality="Medium",
+            unit="Strips",
+            shelf_life_days=730,
+            default_reorder_point=100,
+            default_safety_stock=40,
+            moq=50,
+            unit_cost=45.0,
+            initial_stock=150,
+            initial_warehouse_id="MUM-01"
+        )
+        await add_product(payload=create_payload, current_user=admin_user, db=session)
+
+        # Delete MUM-01 warehouse inventory record
+        del_res = await delete_warehouse_inventory(
+            warehouse_id="MUM-01",
+            sku="TEST-DEL-WH-002",
+            current_user=admin_user,
+            db=session
+        )
+        assert del_res["success"] is True
+
+        # Verify MUM-01 record is gone
+        inv_mum = (await session.execute(
+            select(Inventory).where(Inventory.sku == "TEST-DEL-WH-002", Inventory.warehouse_id == "MUM-01")
+        )).scalars().first()
+        assert inv_mum is None
+
+        # Verify DEL-02 record STILL exists
+        inv_del = (await session.execute(
+            select(Inventory).where(Inventory.sku == "TEST-DEL-WH-002", Inventory.warehouse_id == "DEL-02")
+        )).scalars().first()
+        assert inv_del is not None
+
+        # Verify Product master record STILL exists
+        prod = (await session.execute(
+            select(Product).where(Product.sku == "TEST-DEL-WH-002")
+        )).scalars().first()
+        assert prod is not None
+
+        # Clean up
+        await delete_product(sku="TEST-DEL-WH-002", current_user=admin_user, db=session)
+
+
+@pytest.mark.asyncio
+async def test_safety_stock_sellable_not_locked():
+    from backend.app.database import AsyncSessionLocal
+    from backend.app.routers.inventory import add_product, delete_product
+    from backend.app.schemas.inventory import ProductCreate
+    from backend.app.engines.inventory_engine import InventoryEngine
+    from backend.app.models.inventory import Inventory
+    from backend.app.models.auth import User
+    from sqlalchemy import select
+
+    admin_user = User(id="USR-ADMIN-TEST", role_id="ADMIN", is_active=True)
+
+    async with AsyncSessionLocal() as session:
+        # Create product with 100 stock and 60 safety stock
+        create_payload = ProductCreate(
+            sku="TEST-SELL-SS-003",
+            name="Safety Stock Sellable Drug",
+            category="Vitamins",
+            criticality="Medium",
+            unit="Bottles",
+            shelf_life_days=730,
+            default_reorder_point=80,
+            default_safety_stock=60,
+            moq=50,
+            unit_cost=55.0,
+            initial_stock=100,
+            initial_warehouse_id="MUM-01"
+        )
+        await add_product(payload=create_payload, current_user=admin_user, db=session)
+
+        # Sell 70 units (reducing stock from 100 to 30, which is BELOW safety stock of 60)
+        # This MUST succeed because Safety Stock is a buffer target, NOT permanently locked stock
+        tx, inv = await InventoryEngine.process_transaction(
+            session=session,
+            transaction_type="SALE",
+            sku="TEST-SELL-SS-003",
+            warehouse_id="MUM-01",
+            quantity=70,
+            reference_id="TEST-SO-001",
+            performed_by="Sales Dispatch"
+        )
+        await session.commit()
+
+        assert inv.current_stock == 30
+        assert inv.status == "CRITICAL"  # Because current_stock (30) < safety_stock (60)
+        assert inv.risk_level == "critical"
+
+        # Clean up
+        await delete_product(sku="TEST-SELL-SS-003", current_user=admin_user, db=session)
+
+

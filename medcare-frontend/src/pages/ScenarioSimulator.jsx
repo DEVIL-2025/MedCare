@@ -81,7 +81,7 @@ export default function ScenarioSimulator() {
   }
 
   if (loading && !simulationResult) {
-    return <LoadingState message="Initializing PostgreSQL What-If stress test engine..." />;
+    return <LoadingState message="Initializing Database What-If stress test engine..." />;
   }
 
   if (error && !simulationResult) {
@@ -99,7 +99,7 @@ export default function ScenarioSimulator() {
       <div className="bg-white p-3.5 rounded-lg border border-ink-100 shadow-card flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-[16px] font-bold text-ink-900">What-If Scenario Simulator & Stress Testing</h2>
-          <p className="text-[12px] text-ink-500">Simulate epidemic surges, lead time delays, and supplier disruptions directly against PostgreSQL inventory records.</p>
+          <p className="text-[12px] text-ink-500">Simulate epidemic surges, lead time delays, and supplier disruptions directly against Database inventory records.</p>
         </div>
         <button
           onClick={handleReset}
@@ -109,13 +109,36 @@ export default function ScenarioSimulator() {
         </button>
       </div>
 
+      {/* Dynamic Impact Summary KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
+          <span className="text-[11px] text-ink-500 font-medium">Projected Stockouts</span>
+          <div className="text-[18px] font-bold text-brick-600 mt-0.5">{summary.projected_stockout_skus || 0} SKUs</div>
+          <span className="text-[10px] text-brick-600 font-semibold">{summary.stockout_delta || '+0'}</span>
+        </div>
+        <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
+          <span className="text-[11px] text-ink-500 font-medium">Stockout Loss Valuation</span>
+          <div className="text-[18px] font-bold text-brick-600 mt-0.5">{summary.stockout_value || '₹0 Cr'}</div>
+          <span className="text-[10px] text-ink-500 font-medium">Unmet patient orders</span>
+        </div>
+        <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
+          <span className="text-[11px] text-ink-500 font-medium">Service Level (OTIF)</span>
+          <div className="text-[18px] font-bold text-amber-600 mt-0.5">{summary.service_level || '95%'}</div>
+          <span className="text-[10px] text-brick-600 font-semibold">{summary.service_level_delta || '0%'}</span>
+        </div>
+        <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
+          <span className="text-[11px] text-ink-500 font-medium">Replenishment Needed</span>
+          <div className="text-[18px] font-bold text-forest-800 mt-0.5">{summary.replenishment_need || '₹0 Cr'}</div>
+          <span className="text-[10px] text-forest-700 font-semibold">{summary.replenishment_delta || '+₹0 Cr'}</span>
+        </div>
+      </div>
+
       {/* Simulator Grid: Parameter Controls & Real-Time Impact */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
         {/* Left Column: Parameter Inputs */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-4">
+        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-4 self-start h-fit">
           <div className="flex items-center justify-between border-b border-ink-100 pb-2">
             <h3 className="text-[14.5px] font-bold text-ink-900">Simulation Stress Parameters</h3>
-            <Badge tone="forest">Live DB Computation</Badge>
           </div>
 
           <div className="space-y-4 text-[12.5px]">
@@ -217,30 +240,6 @@ export default function ScenarioSimulator() {
 
         {/* Right Column (2 cols): Impact Summary & Comparison */}
         <div className="lg:col-span-2 space-y-5">
-          {/* Dynamic Impact Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
-              <span className="text-[11px] text-ink-500 font-medium">Projected Stockouts</span>
-              <div className="text-[18px] font-bold text-brick-600 mt-0.5">{summary.projected_stockout_skus || 0} SKUs</div>
-              <span className="text-[10px] text-brick-600 font-semibold">{summary.stockout_delta || '+0'}</span>
-            </div>
-            <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
-              <span className="text-[11px] text-ink-500 font-medium">Stockout Loss Valuation</span>
-              <div className="text-[18px] font-bold text-brick-600 mt-0.5">{summary.stockout_value || '₹0 Cr'}</div>
-              <span className="text-[10px] text-ink-500 font-medium">Unmet patient orders</span>
-            </div>
-            <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
-              <span className="text-[11px] text-ink-500 font-medium">Service Level (OTIF)</span>
-              <div className="text-[18px] font-bold text-amber-600 mt-0.5">{summary.service_level || '95%'}</div>
-              <span className="text-[10px] text-brick-600 font-semibold">{summary.service_level_delta || '0%'}</span>
-            </div>
-            <div className="bg-white p-3 rounded-lg border border-ink-100 shadow-card">
-              <span className="text-[11px] text-ink-500 font-medium">Replenishment Needed</span>
-              <div className="text-[18px] font-bold text-forest-800 mt-0.5">{summary.replenishment_need || '₹0 Cr'}</div>
-              <span className="text-[10px] text-forest-700 font-semibold">{summary.replenishment_delta || '+₹0 Cr'}</span>
-            </div>
-          </div>
-
           {/* Side-by-Side Baseline vs Simulated Scenario Impact */}
           <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
             <div className="flex items-center justify-between mb-3">

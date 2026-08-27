@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Search, Building2, Boxes, Gauge, AlertTriangle, Plus, CheckCircle2, Edit2, Trash2
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/ui/StatCard';
 import Badge from '../components/ui/Badge';
 import LoadingState from '../components/ui/LoadingState';
@@ -87,14 +86,13 @@ export default function Warehouses() {
   }
 
   if (loading && !data) {
-    return <LoadingState message="Loading distribution centers and capacity metrics from PostgreSQL..." />;
+    return <LoadingState message="Loading distribution centers and capacity metrics from Database..." />;
   }
 
   if (error && !data) {
     return <ErrorState message={error} onRetry={loadWarehouses} />;
   }
 
-  const capacity_trend = data?.capacity_trend || [];
   const top_by_value = data?.top_by_value || [];
 
   const totalInventory = overviewList.reduce((sum, w) => sum + (Number(w.inventory) || 0), 0);
@@ -119,7 +117,7 @@ export default function Warehouses() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Building2} tone="forest" label="Active Distribution Centers" value={overviewList.length} delta="Active PostgreSQL nodes" />
+        <StatCard icon={Building2} tone="forest" label="Active Distribution Centers" value={overviewList.length} delta="Active Database nodes" />
         <StatCard icon={Boxes} tone="gold" label="Total Network Physical Stock" value={`${totalInventory.toLocaleString()} units`} delta="Physical inventory count" />
         <StatCard icon={Gauge} tone="sage" label="Average Capacity Utilization" value={`${avgUtilization}%`} delta="Network capacity factor" />
         <StatCard icon={AlertTriangle} tone="brick" label="DCs Requiring Attention" value={atRiskCount} delta="Imminent stockout / surge risk" deltaPositive={false} />
@@ -234,56 +232,29 @@ export default function Warehouses() {
         </div>
       )}
 
-      {/* Breakdown Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Capacity Utilization Trend */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">Historical Capacity Utilization Trend (%)</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={capacity_trend} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E5E1" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#68716D' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#68716D' }} axisLine={false} tickLine={false} domain={[0, 100]} />
-                <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: 11, color: '#68716D', paddingBottom: 10 }} />
-                {overviewList.map((w, idx) => {
-                  const strokeColors = ["#177A5B", "#D5A72C", "#3B82F6", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316", "#6366F1", "#10B981"];
-                  return (
-                    <Line
-                      key={w.id}
-                      type="monotone"
-                      dataKey={w.id}
-                      name={`${w.name} (${w.id})`}
-                      stroke={strokeColors[idx % strokeColors.length]}
-                      strokeWidth={2}
-                      dot={{ r: 2 }}
-                    />
-                  );
-                })}
-              </LineChart>
-            </ResponsiveContainer>
+      {/* Distribution Centers Stock Valuation Overview */}
+      <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
+        <div className="flex items-center justify-between mb-3 border-b border-ink-100 pb-2.5">
+          <div>
+            <h3 className="text-[14.5px] font-bold text-ink-900">Distribution Centers by Stock Valuation</h3>
+            <p className="text-[11.5px] text-ink-500">Aggregated inventory valuation and holding values across active distribution facilities.</p>
           </div>
         </div>
-
-        {/* Top Warehouses by Value */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
-          <h3 className="text-[14.5px] font-bold text-ink-900 mb-3">Distribution Centers by Stock Valuation</h3>
-          <div className="space-y-3 pt-2 text-[12px]">
-            {top_by_value.map((item, i) => (
-              <div key={i} className="space-y-1">
-                <div className="flex justify-between text-ink-700">
-                  <span className="font-semibold text-ink-900">{item.name} ({item.id})</span>
-                  <span className="font-bold text-forest-800">{item.value}</span>
-                </div>
-                <div className="w-full bg-cream-200 rounded-full h-2">
-                  <div
-                    className="bg-forest-700 h-2 rounded-full"
-                    style={{ width: `${item.pct}%` }}
-                  />
-                </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 pt-1 text-[12px]">
+          {top_by_value.map((item, i) => (
+            <div key={item.id || i} className="space-y-1 p-2 rounded hover:bg-cream-100/50 transition-colors">
+              <div className="flex justify-between text-ink-700">
+                <span className="font-semibold text-ink-900">{item.name} ({item.id})</span>
+                <span className="font-bold text-forest-800">{item.value}</span>
               </div>
-            ))}
-          </div>
+              <div className="w-full bg-cream-200 rounded-full h-2">
+                <div
+                  className="bg-forest-700 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${item.pct}%` }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -124,58 +124,6 @@ async def get_warehouses_overview(db: AsyncSession = Depends(get_db)) -> Dict[st
 
     top_by_value.sort(key=lambda x: x["valInr"], reverse=True)
 
-    # Dynamic Historical Capacity Trend from Inventory Transactions for all active warehouses
-    capacity_trend = []
-
-    for weeks_ago in range(5, -1, -1):
-        target_date = today - timedelta(days=weeks_ago * 7)
-
-        # End-of-day boundary for the target date
-        target_datetime = datetime.combine(
-            target_date,
-            datetime.max.time()
-        )
-
-        point_data: Dict[str, Any] = {
-            "date": target_date.strftime("%d %b")
-        }
-
-        for wh in warehouses:
-            # Get the latest inventory transaction for this warehouse
-            # on or before the historical date.
-            historical_res = await db.execute(
-                select(InventoryTransaction)
-                .where(
-                    and_(
-                        InventoryTransaction.warehouse_id == wh.id,
-                        InventoryTransaction.timestamp <= target_datetime
-                    )
-                )
-                .order_by(
-                    InventoryTransaction.timestamp.desc(),
-                    InventoryTransaction.id.desc()
-                )
-                .limit(1)
-            )
-
-            historical_transaction = historical_res.scalars().first()
-
-            if historical_transaction:
-                historical_stock = historical_transaction.new_stock
-                historical_utilization = (
-                    historical_stock / max(1, wh.capacity_units)
-                ) * 100
-                point_data[wh.id] = round(
-                    min(100, max(0, historical_utilization)),
-                    1
-                )
-            else:
-                inv_units = wh_inv_map.get(wh.id, 0)
-                current_util = (inv_units / max(1, wh.capacity_units)) * 100 if wh.capacity_units else wh.current_utilization_pct
-                point_data[wh.id] = round(min(100, max(0, float(current_util or 0))), 1)
-
-        capacity_trend.append(point_data)
-
     colors = ["#177A5B", "#1E9270", "#D5A72C", "#68716D", "#3B82F6"]
     inventory_distribution = [
         {
@@ -190,7 +138,6 @@ async def get_warehouses_overview(db: AsyncSession = Depends(get_db)) -> Dict[st
         "overview": overview,
         "map_points": map_points,
         "top_by_value": top_by_value,
-        "capacity_trend": capacity_trend,
         "inventory_distribution": inventory_distribution,
         "metrics": {
             "total_warehouses": len(warehouses),

@@ -21,7 +21,7 @@ from backend.app.models.forecast import ForecastRecord, DemandSurgeEvent
 from backend.app.models.signal import DemandSignal
 from backend.app.models.demand import DemandHistory, Promotion, DistributorOrder
 from backend.app.ml.predict import PredictionService
-from backend.app.schemas.inventory import ProductCreate, ProductResponse, SaleCreate
+from backend.app.schemas.inventory import ProductCreate, ProductResponse, SaleCreate, InventoryConfigUpdate
 from backend.app.engines.inventory_engine import InventoryEngine
 from backend.app.engines.expiry_fefo_engine import ExpiryFEFOEngine
 from backend.app.engines.risk_engine import RiskEngine
@@ -168,6 +168,9 @@ async def get_inventory(
                 "reservedStock": inv.reserved_stock,
                 "availableStock": inv.available_stock,
                 "reorderPoint": inv.reorder_point,
+                "safetyStock": inv.safety_stock,
+                "unitCost": prod.unit_cost,
+                "moq": prod.moq,
                 "daysOfCover": inv.days_of_cover,
                 "status": inv.status.replace("_", " ").title(),
                 "risk": inv.risk_level,
@@ -606,3 +609,237 @@ async def get_categories(db: AsyncSession = Depends(get_db)) -> List[str]:
     """Returns list of distinct pharmaceutical product categories."""
     res = await db.execute(select(Product.category).distinct())
     return [c[0] for c in res.all()]
+
+
+@router.put("/{warehouse_id}/{sku}")
+async def update_inventory_config(
+    warehouse_id: str,
+    sku: str,
+    payload: InventoryConfigUpdate,
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Updates warehouse-specific inventory configuration (Reorder Point, Safety Stock)
+    and master product attributes (Price/Unit Cost, MOQ).
+    Recalculates inventory status, risk level, replenishment recommendations, and alerts.
+    """
+    clean_wh = warehouse_id.strip().upper()
+    clean_sku = sku.strip().upper()
+
+    wh_res = await db.execute(select(Warehouse).where(Warehouse.id == clean_wh))
+    warehouse = wh_res.scalars().first()
+    if not warehouse:
+        raise HTTPException(status_code=404, detail=f"Warehouse '{warehouse_id}' not found in database.")
+
+    prod_res = await db.execute(select(Product).where(Product.sku == clean_sku))
+    prod = prod_res.scalars().first()
+    if not prod:
+        raise HTTPException(status_code=404, detail=f"Product with SKU '{sku}' not found in database.")
+
+    # Fetch or create Inventory record
+    inv_res = await db.execute(
+        select(Inventory).where(and_(Inventory.sku == clean_sku, Inventory.warehouse_id == clean_wh))
+    )
+    inv = inv_res.scalars().first()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if not inv:
+        inv = Inventory(
+            sku=clean_sku,
+            warehouse_id=clean_wh,
+            current_stock=0,
+            reserved_stock=0,
+            inbound_stock=0,
+            reorder_point=payload.reorder_point if payload.reorder_point is not None else prod.default_reorder_point,
+            safety_stock=payload.safety_stock if payload.safety_stock is not None else prod.default_safety_stock,
+            status="OUT_OF_STOCK",
+            risk_level="critical",
+            days_of_cover=0.0,
+            last_recalculated_at=now_utc
+        )
+        db.add(inv)
+        await db.flush()
+
+    # 1. Update warehouse-specific inventory fields
+    if payload.reorder_point is not None:
+        inv.reorder_point = max(0, int(payload.reorder_point))
+    if payload.safety_stock is not None:
+        inv.safety_stock = max(0, int(payload.safety_stock))
+
+    # 2. Update product master fields if provided
+    if payload.unit_cost is not None:
+        prod.unit_cost = max(0.01, round(float(payload.unit_cost), 2))
+    if payload.moq is not None:
+        prod.moq = max(1, int(payload.moq))
+
+    # 3. Optional stock count override with audit log
+    if payload.current_stock is not None and payload.current_stock != inv.current_stock:
+        old_stock = inv.current_stock
+        new_stock = max(0, int(payload.current_stock))
+        inv.current_stock = new_stock
+        tx = InventoryTransaction(
+            transaction_type="ADJUSTMENT",
+            sku=clean_sku,
+            warehouse_id=clean_wh,
+            quantity=new_stock - old_stock,
+            previous_stock=old_stock,
+            new_stock=new_stock,
+            reference_id=f"ADJ-{int(now_utc.timestamp())}",
+            reason="Planner warehouse inventory configuration update",
+            performed_by=current_user.full_name if current_user else "SCM Planner",
+            timestamp=now_utc
+        )
+        db.add(tx)
+
+    # 4. Dynamic status & risk re-evaluation
+    dyn_status, dyn_risk = InventoryEngine.evaluate_inventory_status(
+        inv.current_stock, inv.reorder_point, inv.safety_stock
+    )
+    inv.status = dyn_status
+    inv.risk_level = dyn_risk
+    daily_rate = max(1.0, inv.reorder_point / 20.0)
+    inv.days_of_cover = round(inv.current_stock / daily_rate, 1) if inv.current_stock > 0 else 0.0
+    inv.last_recalculated_at = now_utc
+    inv.updated_at = now_utc
+    prod.updated_at = now_utc
+
+    # 5. Synchronize dependent engines
+    await RiskEngine.evaluate_inventory_risk(db, clean_sku, clean_wh)
+    await AlertEscalationEngine.sync_inventory_alerts(db, sku=clean_sku, warehouse_id=clean_wh)
+    await NetworkBalancingEngine.identify_network_transfers(db)
+    await ReplenishmentEngine.sync_recommendations(db)
+
+    await db.commit()
+
+    # Broadcast WebSocket update
+    await ws_manager.broadcast({
+        "event": "INVENTORY_CONFIG_UPDATED",
+        "sku": clean_sku,
+        "warehouse_id": clean_wh,
+        "reorder_point": inv.reorder_point,
+        "safety_stock": inv.safety_stock,
+        "unit_cost": prod.unit_cost,
+        "status": inv.status,
+        "message": f"Inventory configuration updated for {prod.name} at {warehouse.name} ({clean_wh})."
+    })
+    await ws_manager.broadcast({
+        "event": "REPLENISHMENT_UPDATED",
+        "timestamp": now_utc.isoformat()
+    })
+
+    return {
+        "success": True,
+        "sku": clean_sku,
+        "name": prod.name,
+        "warehouse_id": clean_wh,
+        "warehouse": clean_wh,
+        "currentStock": inv.current_stock,
+        "availableStock": inv.available_stock,
+        "reorderPoint": inv.reorder_point,
+        "safetyStock": inv.safety_stock,
+        "unitCost": prod.unit_cost,
+        "moq": prod.moq,
+        "daysOfCover": inv.days_of_cover,
+        "status": inv.status.replace("_", " ").title(),
+        "risk": inv.risk_level,
+        "message": f"Configuration saved successfully for {prod.name} at {clean_wh}."
+    }
+
+
+@router.delete("/{warehouse_id}/{sku}")
+async def delete_warehouse_inventory(
+    warehouse_id: str,
+    sku: str,
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Deletes the warehouse-specific inventory tracking record and local batches for a given product.
+    Preserves the product master catalog entry in the database.
+    """
+    clean_wh = warehouse_id.strip().upper()
+    clean_sku = sku.strip().upper()
+
+    inv_res = await db.execute(
+        select(Inventory).where(and_(Inventory.sku == clean_sku, Inventory.warehouse_id == clean_wh))
+    )
+    inv = inv_res.scalars().first()
+    if not inv:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Inventory record for SKU '{sku}' in warehouse '{warehouse_id}' not found."
+        )
+
+    prod_res = await db.execute(select(Product).where(Product.sku == clean_sku))
+    prod = prod_res.scalars().first()
+    prod_name = prod.name if prod else sku
+
+    # 1. Delete associated alerts for this specific warehouse & sku
+    alert_ids_res = await db.execute(
+        select(Alert.id).where(and_(Alert.sku == clean_sku, Alert.warehouse_id == clean_wh))
+    )
+    alert_ids = alert_ids_res.scalars().all()
+    if alert_ids:
+        await db.execute(delete(NotificationLog).where(NotificationLog.alert_id.in_(alert_ids)))
+        await db.execute(delete(AlertEscalation).where(AlertEscalation.alert_id.in_(alert_ids)))
+        await db.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
+
+    # 2. Delete inventory transfer records and recommendations for this warehouse & sku
+    await db.execute(
+        delete(InventoryTransfer).where(
+            and_(
+                InventoryTransfer.sku == clean_sku,
+                or_(
+                    InventoryTransfer.source_warehouse_id == clean_wh,
+                    InventoryTransfer.destination_warehouse_id == clean_wh
+                )
+            )
+        )
+    )
+    await db.execute(
+        delete(ReplenishmentRecommendation).where(
+            and_(
+                ReplenishmentRecommendation.sku == clean_sku,
+                ReplenishmentRecommendation.warehouse_id == clean_wh
+            )
+        )
+    )
+
+    # 3. Delete batches at this warehouse
+    await db.execute(
+        delete(Batch).where(and_(Batch.sku == clean_sku, Batch.warehouse_id == clean_wh))
+    )
+
+    # 4. Delete the Inventory row itself
+    await db.execute(
+        delete(Inventory).where(and_(Inventory.sku == clean_sku, Inventory.warehouse_id == clean_wh))
+    )
+
+    # Recalculate recommendations & balancing
+    await NetworkBalancingEngine.identify_network_transfers(db)
+    await ReplenishmentEngine.sync_recommendations(db)
+
+    await db.commit()
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Broadcast WebSocket update
+    await ws_manager.broadcast({
+        "event": "INVENTORY_CONFIG_DELETED",
+        "sku": clean_sku,
+        "warehouse_id": clean_wh,
+        "message": f"Inventory record for '{prod_name}' at warehouse '{clean_wh}' was removed."
+    })
+    await ws_manager.broadcast({
+        "event": "REPLENISHMENT_UPDATED",
+        "timestamp": now_utc.isoformat()
+    })
+
+    return {
+        "success": True,
+        "sku": clean_sku,
+        "warehouse_id": clean_wh,
+        "message": f"Inventory record for '{prod_name}' ({clean_sku}) at warehouse '{clean_wh}' removed from database."
+    }
+

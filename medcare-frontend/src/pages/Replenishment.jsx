@@ -144,7 +144,7 @@ export default function Replenishment() {
     setActionError(null);
     try {
       const res = await api.approveRecommendation(id);
-      setActionSuccess(res.message || `Recommendation ${id} approved! PO / Transfer scheduled in PostgreSQL.`);
+      setActionSuccess(res.message || `Recommendation ${id} approved! PO / Transfer scheduled in Database.`);
       setReviewItem(null);
       triggerRefresh();
       await loadReplenishment();
@@ -289,7 +289,6 @@ export default function Replenishment() {
               <div className="p-3.5 border-b border-ink-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="text-[15px] font-semibold text-ink-900">Explainable Replenishment Recommendations</h3>
-                  <span className="text-[11px] text-ink-500 font-medium">Recommended Qty = ML Forecasted Demand − Current Stock</span>
                 </div>
                 <div className="relative max-w-xs w-full">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
@@ -395,21 +394,6 @@ export default function Replenishment() {
                   ))}
                 </div>
               </div>
-
-              <div className="bg-white p-4 rounded-lg border border-ink-100 shadow-card">
-                <h4 className="text-[13.5px] font-bold text-ink-900 mb-2">Top Supplier Fulfillment</h4>
-                <div className="space-y-2">
-                  {top_suppliers.slice(0, 4).map((s) => (
-                    <div key={s.name} className="flex items-center justify-between text-[12px] border-b border-ink-100 pb-1.5 last:border-0">
-                      <div>
-                        <div className="font-semibold text-ink-900">{s.name}</div>
-                        <div className="text-[10px] text-ink-400">OTIF: {s.otif} • LT: {s.leadTime}</div>
-                      </div>
-                      <span className="font-bold text-forest-800">{s.spend}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -489,7 +473,7 @@ export default function Replenishment() {
                   <Sparkles size={15} className="text-forest-700" />
                   <span>Live FEFO Batch Priority & Expiry Allocation Explorer</span>
                 </h4>
-                <p className="text-[11.5px] text-ink-500">Live PostgreSQL batch ordering based on strict First-Expiry-First-Out criteria.</p>
+                <p className="text-[11.5px] text-ink-500">Live Database batch ordering based on strict First-Expiry-First-Out criteria.</p>
               </div>
               <div className="flex items-center gap-2">
                 <select
@@ -517,7 +501,7 @@ export default function Replenishment() {
             {loadingExplorer ? (
               <div className="py-6 text-center text-ink-400 text-[12px]">Loading live batch allocations...</div>
             ) : explorerBatches.length === 0 ? (
-              <div className="py-6 text-center text-ink-400 text-[12px]">No active valid batches found for this SKU & location in PostgreSQL.</div>
+              <div className="py-6 text-center text-ink-400 text-[12px]">No active valid batches found for this SKU & location in Database.</div>
             ) : (
               <div className="overflow-x-auto mt-3">
                 <table className="w-full text-left text-[12px]">
@@ -741,7 +725,7 @@ export default function Replenishment() {
               </div>
 
               {loadingFefo ? (
-                <div className="py-4 text-center text-ink-400 text-[11.5px]">Loading live batch allocations from PostgreSQL...</div>
+                <div className="py-4 text-center text-ink-400 text-[11.5px]">Loading live batch allocations from Database...</div>
               ) : fefoBatches.length === 0 ? (
                 <div className="p-2.5 rounded bg-amber-50 text-amber-900 text-[11px] border border-amber-200">
                   No near-expiry source batches available in network. Procurement purchase order recommended.

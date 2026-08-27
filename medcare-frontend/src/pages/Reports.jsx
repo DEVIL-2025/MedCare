@@ -215,7 +215,7 @@ export default function Reports() {
   }
 
   if (loading && !data) {
-    return <LoadingState message="Aggregating PostgreSQL supply chain financial ROI and inventory aging analytics..." />;
+    return <LoadingState message="Aggregating Database supply chain financial ROI and inventory aging analytics..." />;
   }
 
   if (error && !data) {
@@ -247,7 +247,7 @@ export default function Reports() {
               </span>
             )}
           </div>
-          <p className="text-[12px] text-ink-500">Live PostgreSQL valuation trends, FEFO batch aging distributions, and before-vs-after ROI metrics.</p>
+          <p className="text-[12px] text-ink-500">Live Database valuation trends, FEFO batch aging distributions, and before-vs-after ROI metrics.</p>
         </div>
         <button
           onClick={exportReportCSV}

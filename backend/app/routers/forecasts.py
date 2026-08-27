@@ -36,7 +36,7 @@ async def train_model(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Triggers explicit model retraining on the current PostgreSQL/SQLite database records (Admin Only).
+    Triggers explicit model retraining on the current PostgreSQL database records (Admin Only).
     """
     metadata = await ModelRegistry.retrain_model(db)
     return {

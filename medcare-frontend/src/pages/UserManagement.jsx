@@ -252,7 +252,7 @@ export default function UserManagement() {
           <div>
             <h2 className="text-[17px] font-bold text-ink-900 leading-tight">Admin User Management & RBAC</h2>
             <p className="text-[12px] text-ink-500">
-              Provision stakeholders, configure role-based access controls, and audit security events in PostgreSQL.
+              Provision stakeholders, configure role-based access controls, and audit security events in Database.
             </p>
           </div>
         </div>
@@ -325,7 +325,7 @@ export default function UserManagement() {
 
           {/* User List Table */}
           {loadingUsers ? (
-            <LoadingState message="Fetching persistent user accounts from PostgreSQL..." />
+            <LoadingState message="Fetching persistent user accounts from Database..." />
           ) : userError ? (
             <ErrorState message={userError} onRetry={loadUsers} />
           ) : filteredUsers.length === 0 ? (
@@ -481,7 +481,7 @@ export default function UserManagement() {
           </div>
 
           {loadingAudit ? (
-            <LoadingState message="Loading persistent security audit logs from PostgreSQL..." />
+            <LoadingState message="Loading persistent security audit logs from Database..." />
           ) : auditLogs.length === 0 ? (
             <EmptyState
               title="No Audit Records"
@@ -789,7 +789,7 @@ export default function UserManagement() {
                 Temporary Password Generated!
               </div>
               <p className="text-[12px] text-amber-800">
-                The password has been updated in PostgreSQL. The user will be required to create a new password on their next login.
+                The password has been updated in Database. The user will be required to create a new password on their next login.
               </p>
             </div>
 

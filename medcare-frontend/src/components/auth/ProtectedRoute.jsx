@@ -10,7 +10,7 @@ export default function ProtectedRoute({ children, requireAdmin = false }) {
   if (loading) {
     return (
       <div className="min-h-screen bg-cream-100 flex items-center justify-center">
-        <LoadingState message="Verifying secure authentication session with PostgreSQL..." />
+        <LoadingState message="Verifying secure authentication session with Database..." />
       </div>
     );
   }

@@ -98,7 +98,7 @@ export default function DemandForecast() {
     setTrainMessage(null);
     try {
       const res = await api.trainModel();
-      setTrainMessage(res.message || 'ML model successfully retrained on live PostgreSQL demand history!');
+      setTrainMessage(res.message || 'ML model successfully retrained on live Database demand history!');
       await loadForecastData();
       setTimeout(() => setTrainMessage(null), 4500);
     } catch (err) {
@@ -109,7 +109,7 @@ export default function DemandForecast() {
   }
 
   if (loading && !forecastData) {
-    return <LoadingState message="Executing Random Forest ML demand inference on live PostgreSQL time-series..." />;
+    return <LoadingState message="Executing Random Forest ML demand inference on live Database time-series..." />;
   }
 
   if (error && !forecastData) {
@@ -128,7 +128,6 @@ export default function DemandForecast() {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-[16px] font-bold text-ink-900">ML Demand Sensing & Multi-Signal Forecast</h2>
-            <Badge tone="forest">scikit-learn Random Forest Regressor</Badge>
           </div>
           <p className="text-[12px] text-ink-500">Live multi-signal sensing integrating historical sales velocity, epidemiology, weather patterns, and promotions.</p>
         </div>
@@ -260,7 +259,7 @@ export default function DemandForecast() {
         <div className="mb-3 p-3 bg-cream-100/90 rounded-md border border-ink-100 text-[11.5px] text-ink-700 flex items-start gap-2">
           <Sparkles size={15} className="text-forest-700 shrink-0 mt-0.5" />
           <div>
-            <strong className="text-ink-900">How to interpret this forecast:</strong> The green line shows confirmed daily sales actuals from <code className="font-mono bg-cream-200 px-1 py-0.5 rounded text-[10.5px]">demand_history</code>. The dashed gold line is the Random Forest forward demand projection adjusted for active external signals (epidemics, promotions, weather events). The gold shaded band represents the 95% confidence interval.
+            <strong className="text-ink-900">How to interpret this forecast:</strong> The green line shows confirmed daily sales actuals from historical data. The dashed gold line is the Random Forest forward demand projection adjusted for active external signals (epidemics, promotions, weather events). The gold shaded band represents the 95% confidence interval.
           </div>
         </div>
 

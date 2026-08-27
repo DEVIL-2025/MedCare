@@ -2,6 +2,7 @@ import logging
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 from backend.app.config import settings
 
 logger = logging.getLogger("MedCareControlTower")
@@ -11,65 +12,63 @@ class Base(DeclarativeBase):
     pass
 
 
-def _create_engine_and_session(url: str):
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    eng = create_async_engine(
-        url,
-        echo=False,
-        connect_args=connect_args,
-        future=True
-    )
-    sess_factory = async_sessionmaker(
-        bind=eng,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False
-    )
-    return eng, sess_factory
-
-
+# PostgreSQL-only engine and session factory
 _active_url = settings.async_database_url
-engine, _session_factory = _create_engine_and_session(_active_url)
+
+engine = create_async_engine(
+    _active_url,
+    echo=False,
+    future=True,
+    pool_pre_ping=True
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False
+)
 
 
-class _SessionProxy:
-    """Dynamic session proxy ensuring any module calling AsyncSessionLocal() gets the active session."""
-    def __call__(self, *args, **kwargs) -> AsyncSession:
-        return _session_factory(*args, **kwargs)
-
-
-AsyncSessionLocal = _SessionProxy()
+async def check_db_health() -> bool:
+    """Tests live connectivity to the PostgreSQL database."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.error(f"[Database] PostgreSQL health check failed: {type(e).__name__} - {e}")
+        return False
 
 
 async def init_database():
     """
-    Initializes database tables, testing connection to PostgreSQL.
-    If PostgreSQL authentication fails (e.g. password mismatch in .env),
-    it automatically falls back to SQLite so the server starts seamlessly without crashing.
+    Initializes database tables on the configured PostgreSQL database.
+    PostgreSQL is the sole data source. No fallback to SQLite or demo data is permitted.
     """
-    global engine, _session_factory, _active_url
+    safe_url = _active_url.split("@")[-1] if "@" in _active_url else _active_url
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info(f"[Database] Connected successfully to database: {_active_url}")
+        logger.info(f"[Database] Connected successfully to PostgreSQL database: {safe_url}")
     except Exception as e:
-        if not _active_url.startswith("sqlite"):
-            logger.warning(
-                f"[Database] PostgreSQL connection failed ({type(e).__name__}: {e}).\n"
-                "==> Gracefully falling back to local SQLite database (medcare_scm.db) for smooth operation.\n"
-                "==> To use your PostgreSQL instance in pgAdmin, update DB_PASSWORD or DB_USER in your .env file."
+        # If tables already exist in PostgreSQL, test connectivity directly
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            logger.info(f"[Database] Verified live connection to PostgreSQL database: {safe_url}")
+        except Exception as verify_err:
+            logger.error(
+                f"[Database] CRITICAL: Failed to connect to PostgreSQL database ({type(verify_err).__name__}: {verify_err}).\n"
+                f"==> Target PostgreSQL endpoint: {safe_url}\n"
+                "==> PostgreSQL is mandatory. No SQLite, mock, or fallback database will be created."
             )
-            _active_url = "sqlite+aiosqlite:///./medcare_scm.db"
-            engine, _session_factory = _create_engine_and_session(_active_url)
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            logger.info(f"[Database] Initialized fallback database: {_active_url}")
-        else:
-            raise e
+            raise ConnectionError(f"PostgreSQL connection failed: {verify_err}") from verify_err
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI database session dependency for PostgreSQL."""
     async with AsyncSessionLocal() as session:
         try:
             yield session

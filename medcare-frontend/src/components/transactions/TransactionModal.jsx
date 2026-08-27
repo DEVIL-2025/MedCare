@@ -170,7 +170,7 @@ export default function TransactionModal({
         }
       }
 
-      // Live database query for guaranteed PostgreSQL state
+      // Live database query for guaranteed Database state
       try {
         const invRes = await api.getInventory({ warehouse: cleanWh, search: cleanSku });
         if (!isMounted) return;
@@ -293,7 +293,7 @@ export default function TransactionModal({
 
       const res = await api.createTransaction(payload);
 
-      setSuccess(res.message || 'Transaction executed successfully and recorded in PostgreSQL audit trail!');
+      setSuccess(res.message || 'Transaction executed successfully and recorded in Database audit trail!');
       if (onTransactionSuccess) onTransactionSuccess(res);
       if (onSuccess) onSuccess(res);
 
@@ -812,7 +812,7 @@ export default function TransactionModal({
             disabled={loading}
             className="px-4 py-1.5 bg-forest-700 hover:bg-forest-600 text-white rounded text-[12px] font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
           >
-            {loading ? 'Submitting to PostgreSQL...' : 'Commit Transaction to DB'}
+            {loading ? 'Submitting to Database...' : 'Commit Transaction to DB'}
           </button>
         </div>
       </form>

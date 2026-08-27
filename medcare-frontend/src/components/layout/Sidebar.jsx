@@ -80,10 +80,6 @@ export default function Sidebar({ isAiAssistantOpen, onToggleAiAssistant }) {
           </button>
         </div>
       </nav>
-
-      <div className="p-3 border-t border-white/10 text-center">
-        <div className="text-[10.5px] text-cream-100/40">MedCare SCM Control Tower v2.4</div>
-      </div>
     </aside>
   );
 }

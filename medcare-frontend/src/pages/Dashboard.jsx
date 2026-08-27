@@ -218,7 +218,7 @@ export default function Dashboard() {
               </div>
               <h4 className="text-[14px] font-bold text-ink-900">All Recommended Actions Completed</h4>
               <p className="text-[11.5px] text-ink-500">
-                All inter-DC transfers and supplier purchase orders for this scope have been approved and synchronized in PostgreSQL.
+                All inter-DC transfers and supplier purchase orders for this scope have been approved and synchronized in Database.
               </p>
             </div>
           )}
@@ -321,7 +321,6 @@ export default function Dashboard() {
         <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-[15px] font-semibold text-ink-900">Regional DC Status</h3>
-            <span className="text-[11px] text-ink-500 font-mono">Live PostgreSQL Nodes</span>
           </div>
 
           <div className="space-y-2.5">

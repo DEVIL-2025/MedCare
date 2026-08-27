@@ -1,16 +1,18 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import React from 'react';
 import {
   Search, Plus, Download, Package, Boxes, AlertOctagon, PackageX,
   ArrowRightLeft, History, ChevronDown, ChevronRight,
-  Layers, Trash2, HelpCircle, Calendar, Sparkles, Clock, X
+  Layers, Trash2, HelpCircle, Calendar, Sparkles, Clock, X, Sliders, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import StatCard from '../components/ui/StatCard';
 import Badge from '../components/ui/Badge';
 import LoadingState from '../components/ui/LoadingState';
 import ErrorState from '../components/ui/ErrorState';
+import EmptyState from '../components/ui/EmptyState';
 import TransactionModal from '../components/transactions/TransactionModal';
 import AddProductModal from '../components/inventory/AddProductModal';
+import EditInventoryModal from '../components/inventory/EditInventoryModal';
 import { riskTone, riskLabel } from '../data/riskTone';
 import { api } from '../api/client';
 import { useControlTower } from '../context/ControlTowerContext';
@@ -19,20 +21,70 @@ import { formatDate, formatDateTime } from '../utils/dateUtils';
 
 const quickFilters = [
   { key: 'all', label: 'All Items', test: () => true },
-  { key: 'low', label: 'Low Stock', test: (p) => p.status === 'Low Stock' || p.status === 'LOW_STOCK' || p.status === 'Critical' || p.status === 'CRITICAL' || p.hasLowStock || p.hasCritical || (Number(p.currentStock || 0) <= Number(p.reorderPoint || 0)) },
-  { key: 'out', label: 'Stockout / Critical', test: (p) => (
-      p.status === 'Out of Stock' ||
-      p.status === 'OUT_OF_STOCK' ||
-      p.status === 'Critical' ||
-      p.status === 'CRITICAL' ||
-      p.hasCritical ||
-      Number(p.currentStock || 0) <= 0 ||
-      Number(p.availableStock || 0) <= 0 ||
-      p.risk === 'critical' ||
-      (p.warehouseBreakdown && p.warehouseBreakdown.some(w => Number(w.currentStock || 0) <= 0 || w.status === 'Critical' || w.status === 'Out Of Stock'))
-  )},
-  { key: 'expiring', label: 'Expiring Soon (<60d)', test: (p) => Number(p.daysToExpiry || 999) <= 60 || Number(p.earliestExpiryDays || 999) <= 60 || (p.batches && p.batches.some(b => Number(b.daysToExpiry) <= 60)) },
-  { key: 'slow', label: 'Overstock', test: (p) => p.status === 'OVERSTOCK' || p.status === 'Overstock' || Number(p.currentStock || 0) > Number(p.reorderPoint || 0) * 1.8 },
+  {
+    key: 'low',
+    label: 'Low Stock',
+    test: (p) =>
+      Boolean(
+        p &&
+          (p.status === 'Low Stock' ||
+            p.status === 'LOW_STOCK' ||
+            p.status === 'Critical' ||
+            p.status === 'CRITICAL' ||
+            p.hasLowStock ||
+            p.hasCritical ||
+            Number(p.currentStock || 0) <= Number(p.reorderPoint || 0))
+      ),
+  },
+  {
+    key: 'out',
+    label: 'Stockout / Critical',
+    test: (p) =>
+      Boolean(
+        p &&
+          (p.status === 'Out of Stock' ||
+            p.status === 'OUT_OF_STOCK' ||
+            p.status === 'Critical' ||
+            p.status === 'CRITICAL' ||
+            p.hasCritical ||
+            Number(p.currentStock || 0) <= 0 ||
+            Number(p.availableStock || 0) <= 0 ||
+            p.risk === 'critical' ||
+            (Array.isArray(p.warehouseBreakdown) &&
+              p.warehouseBreakdown.some(
+                (w) =>
+                  w &&
+                  (Number(w.currentStock || 0) <= 0 ||
+                    w.status === 'Critical' ||
+                    w.status === 'Out Of Stock' ||
+                    w.status === 'CRITICAL' ||
+                    w.status === 'OUT_OF_STOCK')
+              )))
+      ),
+  },
+  {
+    key: 'expiring',
+    label: 'Expiring Soon (<60d)',
+    test: (p) =>
+      Boolean(
+        p &&
+          (Number(p.daysToExpiry ?? 999) <= 60 ||
+            Number(p.earliestExpiryDays ?? 999) <= 60 ||
+            (Array.isArray(p.batches) &&
+              p.batches.some((b) => b && Number(b.daysToExpiry ?? 999) <= 60)))
+      ),
+  },
+  {
+    key: 'slow',
+    label: 'Overstock',
+    test: (p) =>
+      Boolean(
+        p &&
+          (p.status === 'OVERSTOCK' ||
+            p.status === 'Overstock' ||
+            Number(p.currentStock || 0) > Number(p.reorderPoint || 0) * 1.8)
+      ),
+  },
 ];
 
 export default function Inventory() {
@@ -61,32 +113,66 @@ export default function Inventory() {
   // Modals State
   const [txModalOpen, setTxModalOpen] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
+
+  // User Action Feedback
+  const [actionSuccess, setActionSuccess] = useState(null);
+  const [actionError, setActionError] = useState(null);
+
+  // Request tracking to prevent race conditions when rapidly switching filters
+  const abortControllerRef = useRef(null);
+  const requestIdRef = useRef(0);
 
   const loadInventory = useCallback(async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    const currentRequestId = ++requestIdRef.current;
+
     setLoading(true);
     setError(null);
     try {
       const [items, cats, whs] = await Promise.all([
-        api.getInventory({
-          warehouse: selectedWarehouse,
-          category: categoryFilter,
-          quick_filter: quickFilter,
-          rollup: rollupView && selectedWarehouse === 'All'
-        }),
-        api.getCategories(),
-        api.getWarehouses()
+        api.getInventory(
+          {
+            warehouse: selectedWarehouse,
+            category: categoryFilter,
+            quick_filter: quickFilter,
+            rollup: rollupView && selectedWarehouse === 'All'
+          },
+          { signal: abortController.signal }
+        ),
+        api.getCategories({ signal: abortController.signal }),
+        api.getWarehouses({ signal: abortController.signal })
       ]);
-      setProducts(Array.isArray(items) ? items : []);
-      setCategories(Array.isArray(cats) ? cats : []);
-      setWarehouses(Array.isArray(whs) ? whs : (whs?.overview || []));
+
+      if (currentRequestId === requestIdRef.current) {
+        setProducts(Array.isArray(items) ? items : []);
+        setCategories(Array.isArray(cats) ? cats : []);
+        setWarehouses(Array.isArray(whs) ? whs : (whs?.overview || []));
+        setLoading(false);
+      }
     } catch (err) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted') || currentRequestId !== requestIdRef.current) {
+        return; // Silently ignore stale or cancelled requests
+      }
       console.error('Failed to load inventory:', err);
       setError(err.message || 'Unable to connect to inventory backend service.');
-    } finally {
       setLoading(false);
     }
   }, [selectedWarehouse, categoryFilter, quickFilter, rollupView]);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const loadTransactions = useCallback(async () => {
     setTxLoading(true);
@@ -146,6 +232,20 @@ export default function Inventory() {
     setTxModalOpen(true);
   }
 
+  function handleOpenEditModal(item, targetWh = null) {
+    const isAggregateWh = !item.warehouse || ['all', 'all warehouses', 'network', 'network rollup'].includes(String(item.warehouse).toLowerCase());
+    const normalizedWh = targetWh || (isAggregateWh
+      ? (item.warehouseBreakdown?.[0]?.warehouseId || (selectedWarehouse !== 'All' ? selectedWarehouse : 'MUM-01'))
+      : item.warehouse);
+
+    setEditingItem({
+      ...item,
+      warehouse: normalizedWh,
+      warehouseId: normalizedWh
+    });
+    setEditModalOpen(true);
+  }
+
   function toggleSkuExpand(sku) {
     setExpandedSkus((prev) => ({ ...prev, [sku]: !prev[sku] }));
   }
@@ -154,21 +254,43 @@ export default function Inventory() {
     setExpandedTxIds((prev) => ({ ...prev, [txId]: !prev[txId] }));
   }
 
-  async function handleDeleteProduct(sku, name) {
-    if (window.confirm(`Are you sure you want to delete product "${name}" (${sku}) from the database? All associated batches, transactions, and alerts will be permanently removed.`)) {
+  async function handleDeleteWarehouseInventory(sku, warehouseId, productName) {
+    if (!warehouseId || ['all', 'all warehouses', 'network', 'network rollup'].includes(String(warehouseId).toLowerCase())) {
+      alert("Please expand and select a specific warehouse location to remove its inventory tracking.");
+      return;
+    }
+    if (window.confirm(`Are you sure you want to remove the inventory tracking and local batches for "${productName}" (${sku}) in warehouse ${warehouseId}?\n\nNote: The master product will remain in the catalog.`)) {
       try {
-        await api.deleteProduct(sku);
+        const res = await api.deleteWarehouseInventory(warehouseId, sku);
+        setActionSuccess(res.message || `Inventory tracking for ${sku} in ${warehouseId} removed from database.`);
         triggerRefresh();
         await loadInventory();
+        setTimeout(() => setActionSuccess(null), 3000);
       } catch (err) {
-        alert(`Failed to delete product: ${err.message}`);
+        setActionError(`Failed to delete warehouse inventory: ${err.message}`);
+        setTimeout(() => setActionError(null), 4000);
+      }
+    }
+  }
+
+  async function handleDeleteProduct(sku, name) {
+    if (window.confirm(`Are you sure you want to delete product "${name}" (${sku}) from the master catalog? All associated warehouse inventory, batches, transactions, and alerts across all distribution centers will be permanently removed.`)) {
+      try {
+        await api.deleteProduct(sku);
+        setActionSuccess(`Product "${name}" (${sku}) permanently deleted from master database.`);
+        triggerRefresh();
+        await loadInventory();
+        setTimeout(() => setActionSuccess(null), 3000);
+      } catch (err) {
+        setActionError(`Failed to delete product: ${err.message}`);
+        setTimeout(() => setActionError(null), 4000);
       }
     }
   }
 
   function exportCSV() {
     if (!filtered.length) return;
-    const headers = ['SKU', 'Name', 'Category', 'Warehouse', 'Current Stock', 'Reorder Point', 'Unit Cost', 'Days of Cover', 'Status'];
+    const headers = ['SKU', 'Name', 'Category', 'Warehouse', 'Current Stock', 'Reorder Point', 'Safety Stock', 'Unit Cost', 'Days of Cover', 'Status'];
     const rows = filtered.map(p => [
       p.sku,
       `"${p.name}"`,
@@ -176,6 +298,7 @@ export default function Inventory() {
       p.warehouse,
       p.currentStock,
       p.reorderPoint,
+      p.safetyStock || 0,
       p.unitCost,
       p.daysOfCover,
       p.status
@@ -194,11 +317,25 @@ export default function Inventory() {
 
   return (
     <div className="space-y-5">
+      {/* Action Notification Banners */}
+      {actionSuccess && (
+        <div className="p-3 bg-forest-100 border border-forest-600/30 text-forest-800 rounded-md font-semibold text-[13px] flex items-center gap-2 animate-fadeIn">
+          <CheckCircle2 size={16} className="shrink-0 text-forest-700" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
+      {actionError && (
+        <div className="p-3 bg-brick-100 border border-brick-600/30 text-brick-700 rounded-md font-semibold text-[13px] flex items-center gap-2 animate-fadeIn">
+          <AlertCircle size={16} className="shrink-0 text-brick-600" />
+          <span>{actionError}</span>
+        </div>
+      )}
+
       {/* Top Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-lg border border-ink-100 shadow-card">
         <div>
-          <h2 className="text-[16px] font-bold text-ink-900">Inventory Management & Stock Tracking</h2>
-          <p className="text-[12px] text-ink-500">Live multi-echelon stock levels, FEFO batch expiry dates, and real-time inventory adjustments.</p>
+          <h2 className="text-[16px] font-bold text-ink-900">Inventory Management & Warehouse Settings</h2>
+          <p className="text-[12px] text-ink-500">Warehouse-specific Reorder Points (ROP), Safety Stock buffers, live FEFO batches, and stock configuration.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -255,7 +392,7 @@ export default function Inventory() {
         <StatCard
           label="Stockout / Critical"
           value={outOfStockCount}
-          subtext="Immediate Inbound Required"
+          subtext="Below Safety Stock / Stockout"
           icon={PackageX}
           tone={outOfStockCount > 0 ? 'critical' : 'good'}
           onClick={() => setQuickFilter('out')}
@@ -344,7 +481,7 @@ export default function Inventory() {
 
       {/* Inventory Items Table */}
       {loading ? (
-        <LoadingState message="Loading live inventory records from PostgreSQL..." />
+        <LoadingState message="Loading live inventory records from Database..." />
       ) : error ? (
         <ErrorState message={error} onRetry={loadInventory} />
       ) : filtered.length === 0 ? (
@@ -357,20 +494,28 @@ export default function Inventory() {
                 <tr>
                   {isRollupMode && <th className="w-9 py-3 pl-3 pr-1 text-center"></th>}
                   <th className="py-3 px-3 text-left">SKU & Product</th>
-                  <th className="py-3 px-3 text-left w-28">Category</th>
-                  <th className="py-3 px-3 text-left w-32">Warehouse Scope</th>
-                  <th className="py-3 px-3 text-right w-28">Total Stock</th>
-                  <th className="py-3 px-3 text-right w-24">Reorder Point</th>
-                  <th className="py-3 px-3 text-right w-24">Days of Cover</th>
-                  <th className="py-3 px-3 text-center w-28">Health Status</th>
-                  <th className="py-3 px-3 text-right w-36">Quick Actions</th>
+                  <th className="py-3 px-3 text-left w-24">Category</th>
+                  <th className="py-3 px-3 text-left w-28">{isRollupMode ? 'Warehouse Scope' : 'DC Location'}</th>
+                  <th className="py-3 px-3 text-right w-24">Total Stock</th>
+                  {!isRollupMode && (
+                    <>
+                      <th className="py-3 px-3 text-right w-24">Reorder Point</th>
+                      <th className="py-3 px-3 text-right w-24">Safety Stock</th>
+                      <th className="py-3 px-3 text-right w-24">Price (INR)</th>
+                      <th className="py-3 px-3 text-right w-20">Days Cover</th>
+                    </>
+                  )}
+                  <th className="py-3 px-3 text-center w-24">Health Status</th>
+                  <th className="py-3 px-3 text-right w-36">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
                 {filtered.map((item, idx) => {
                   const currentStock = Number(item.currentStock || 0);
                   const reorderPoint = Number(item.reorderPoint || 0);
+                  const safetyStock = Number(item.safetyStock || 0);
                   const daysCover = Number(item.daysOfCover || 0);
+                  const unitCost = Number(item.unitCost || item.price || 0);
                   const hasBreakdown = item.warehouseBreakdown && item.warehouseBreakdown.length > 0;
                   const itemBatches = item.batches || [];
                   const isExpanded = expandedSkus[item.sku];
@@ -406,14 +551,24 @@ export default function Inventory() {
                           <div className="font-bold text-ink-900">{currentStock.toLocaleString()}</div>
                           <div className="text-[10px] text-ink-400 font-normal">{item.unit || 'Units'}</div>
                         </td>
-                        <td className="py-3 px-3 text-right align-middle text-ink-600 font-mono">
-                          {reorderPoint.toLocaleString()}
-                        </td>
-                        <td className="py-3 px-3 text-right align-middle">
-                          <span className={`font-semibold ${daysCover <= 5 ? 'text-brick-600' : daysCover <= 12 ? 'text-amber-600' : 'text-forest-700'}`}>
-                            {daysCover.toFixed(1)}d
-                          </span>
-                        </td>
+                        {!isRollupMode && (
+                          <>
+                            <td className="py-3 px-3 text-right align-middle text-ink-600 font-mono">
+                              {reorderPoint.toLocaleString()}
+                            </td>
+                            <td className="py-3 px-3 text-right align-middle text-ink-600 font-mono">
+                              {safetyStock.toLocaleString()}
+                            </td>
+                            <td className="py-3 px-3 text-right align-middle font-semibold text-ink-900">
+                              ₹{unitCost.toFixed(2)}
+                            </td>
+                            <td className="py-3 px-3 text-right align-middle">
+                              <span className={`font-semibold ${daysCover <= 5 ? 'text-brick-600' : daysCover <= 12 ? 'text-amber-600' : 'text-forest-700'}`}>
+                                {daysCover.toFixed(1)}d
+                              </span>
+                            </td>
+                          </>
+                        )}
                         <td className="py-3 px-3 text-center align-middle">
                           <Badge tone={riskTone[item.risk] || (item.status === 'Healthy' ? 'good' : item.status === 'Low Stock' ? 'warning' : 'critical')}>
                             {item.status || riskLabel[item.risk] || 'Active'}
@@ -421,20 +576,39 @@ export default function Inventory() {
                         </td>
                         <td className="py-3 px-3 text-right align-middle">
                           <div className="flex items-center justify-end gap-1.5">
+                            {!isRollupMode && (
+                              <button
+                                onClick={() => handleOpenEditModal(item)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-ink-200 text-ink-700 hover:bg-forest-50 hover:text-forest-700 hover:border-forest-600 transition-colors cursor-pointer shadow-xs"
+                                title="Edit Warehouse Settings (ROP, Safety Stock, Price)"
+                              >
+                                <Sliders size={12} /> Edit
+                              </button>
+                            )}
                             <button
                               onClick={() => handleOpenTxModal(item)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded border border-ink-200 text-ink-700 hover:bg-forest-50 hover:text-forest-700 hover:border-forest-600 transition-colors cursor-pointer shadow-xs"
-                              title="Record Inventory Transaction (Sale, Receipt, Audit, Transfer)"
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-ink-200 text-ink-700 hover:bg-forest-50 hover:text-forest-700 hover:border-forest-600 transition-colors cursor-pointer shadow-xs"
+                              title="Record Stock Transaction"
                             >
                               <Plus size={12} /> Stock Tx
                             </button>
-                            <button
-                              onClick={() => handleDeleteProduct(item.sku, item.name)}
-                              className="inline-flex items-center gap-1 p-1 text-[11px] font-medium rounded border border-brick-600/30 text-brick-700 hover:bg-brick-100 transition-colors cursor-pointer"
-                              title="Archive / Delete Product"
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            {selectedWarehouse !== 'All' ? (
+                              <button
+                                onClick={() => handleDeleteWarehouseInventory(item.sku, item.warehouse, item.name)}
+                                className="inline-flex items-center gap-1 p-1 text-[11px] font-medium rounded border border-brick-600/30 text-brick-700 hover:bg-brick-100 transition-colors cursor-pointer"
+                                title="Delete Warehouse Inventory Tracking"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleDeleteProduct(item.sku, item.name)}
+                                className="inline-flex items-center gap-1 p-1 text-[11px] font-medium rounded border border-brick-600/30 text-brick-700 hover:bg-brick-100 transition-colors cursor-pointer"
+                                title="Permanently Delete Product Catalog Master Record"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -442,14 +616,19 @@ export default function Inventory() {
                       {/* Collapsible Per-DC & Batch Breakdown View */}
                       {isExpanded && (
                         <tr className="bg-cream-100/40">
-                          <td colSpan={isRollupMode ? 9 : 8} className="p-0">
+                          <td colSpan={isRollupMode ? 7 : 10} className="p-0">
                             <div className="border-t border-b border-ink-100/80 px-6 py-4 space-y-4 animate-fadeIn">
                               {/* 1. Regional DC Breakdown Table */}
                               {hasBreakdown && (
                                 <div className="space-y-2">
-                                  <div className="text-[12px] font-bold text-ink-800 flex items-center gap-1.5">
-                                    <Layers size={14} className="text-forest-700" />
-                                    <span>Regional DC Inventory Breakdown for {item.name} ({item.sku}):</span>
+                                  <div className="text-[12px] font-bold text-ink-800 flex items-center justify-between">
+                                    <span className="flex items-center gap-1.5">
+                                      <Layers size={14} className="text-forest-700" />
+                                      <span>Regional DC Breakdown & Warehouse Settings for {item.name} ({item.sku}):</span>
+                                    </span>
+                                    <span className="text-[11px] text-ink-400 font-normal">
+                                      {item.warehouseBreakdown.length} warehouses configured
+                                    </span>
                                   </div>
                                   <table className="w-full text-left text-[11.5px] bg-white rounded-md border border-ink-100 shadow-xs">
                                     <thead className="bg-cream-200/60 text-ink-600 font-semibold border-b border-ink-100 text-[10.5px] uppercase">
@@ -464,9 +643,11 @@ export default function Inventory() {
                                           </span>
                                         </th>
                                         <th className="py-2 px-3 text-right">Reorder Point (ROP)</th>
+                                        <th className="py-2 px-3 text-right">Safety Stock</th>
+                                        <th className="py-2 px-3 text-right">Unit Price</th>
                                         <th className="py-2 px-3 text-right">Days of Cover</th>
                                         <th className="py-2 px-3 text-center">Status</th>
-                                        <th className="py-2 px-3 text-right">Action</th>
+                                        <th className="py-2 px-3 text-right">Actions</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-ink-100">
@@ -474,18 +655,48 @@ export default function Inventory() {
                                         <tr key={wIdx} className="hover:bg-cream-100/50">
                                           <td className="py-2 px-3 font-mono font-bold text-ink-800">{wb.warehouseId}</td>
                                           <td className="py-2 px-3 text-right font-bold text-ink-900">{Number(wb.currentStock).toLocaleString()}</td>
-                                          <td className="py-2 px-3 text-right text-ink-500 font-mono">{Number(wb.reorderPoint).toLocaleString()}</td>
+                                          <td className="py-2 px-3 text-right text-ink-600 font-mono">{Number(wb.reorderPoint).toLocaleString()}</td>
+                                          <td className="py-2 px-3 text-right text-ink-600 font-mono">{Number(wb.safetyStock || 0).toLocaleString()}</td>
+                                          <td className="py-2 px-3 text-right font-semibold text-ink-800">₹{Number(wb.unitCost || item.unitCost || 0).toFixed(2)}</td>
                                           <td className="py-2 px-3 text-right font-semibold text-forest-700">{Number(wb.daysOfCover).toFixed(1)}d</td>
                                           <td className="py-2 px-3 text-center">
                                             <Badge tone={riskTone[wb.risk] || 'good'}>{wb.status}</Badge>
                                           </td>
                                           <td className="py-2 px-3 text-right">
-                                            <button
-                                              onClick={() => handleOpenTxModal({ sku: item.sku, warehouse: wb.warehouseId, currentStock: wb.currentStock })}
-                                              className="text-forest-700 hover:text-forest-900 hover:underline text-[11px] font-semibold cursor-pointer"
-                                            >
-                                              + Transact
-                                            </button>
+                                            <div className="flex items-center justify-end gap-2">
+                                              <button
+                                                onClick={() => handleOpenEditModal({
+                                                  sku: item.sku,
+                                                  name: item.name,
+                                                  category: item.category,
+                                                  warehouse: wb.warehouseId,
+                                                  warehouseId: wb.warehouseId,
+                                                  reorderPoint: wb.reorderPoint,
+                                                  safetyStock: wb.safetyStock,
+                                                  currentStock: wb.currentStock,
+                                                  unitCost: wb.unitCost || item.unitCost,
+                                                  moq: wb.moq || item.moq,
+                                                  unit: item.unit
+                                                })}
+                                                className="text-forest-700 hover:text-forest-900 hover:underline text-[11px] font-semibold cursor-pointer inline-flex items-center gap-0.5"
+                                                title="Edit warehouse settings"
+                                              >
+                                                <Sliders size={11} /> Edit
+                                              </button>
+                                              <button
+                                                onClick={() => handleOpenTxModal({ sku: item.sku, warehouse: wb.warehouseId, currentStock: wb.currentStock })}
+                                                className="text-forest-700 hover:text-forest-900 hover:underline text-[11px] font-semibold cursor-pointer"
+                                              >
+                                                + Transact
+                                              </button>
+                                              <button
+                                                onClick={() => handleDeleteWarehouseInventory(item.sku, wb.warehouseId, item.name)}
+                                                className="text-brick-600 hover:text-brick-800 hover:underline text-[11px] font-semibold cursor-pointer inline-flex items-center gap-0.5"
+                                                title="Delete warehouse tracking"
+                                              >
+                                                <Trash2 size={11} /> Delete
+                                              </button>
+                                            </div>
                                           </td>
                                         </tr>
                                       ))}
@@ -569,31 +780,33 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Recent Inventory Transactions Live Audit Log with Dynamic Search & Expand/Collapse */}
-      <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-ink-100">
+      {/* Historical Inventory Audit Trail */}
+      <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
           <div>
-            <h3 className="text-[14.5px] font-bold text-ink-900 flex items-center gap-1.5">
-              <History size={16} className="text-forest-700" /> Recent Inventory Transactions (Live PostgreSQL Log)
+            <h3 className="text-[15px] font-bold text-ink-900 flex items-center gap-1.5">
+              <History size={16} className="text-forest-700" /> Historical Stock Transactions Audit Trail
             </h3>
-            <span className="text-[11px] text-ink-500">Real-Time Inbound, Outbound & Inter-DC Transfer Audit Ledger</span>
+            <p className="text-[11.5px] text-ink-500">Live database audit log of physical receipts, sales dispatch, and stock adjustments.</p>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Dynamic Search Box */}
+          <div className="flex items-center gap-2">
+            {/* Search Input for Transactions */}
             <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
               <input
                 type="text"
-                placeholder="Search history (SKU, DC, Type, Ref)..."
+                placeholder="Search transactions..."
                 value={txSearch}
                 onChange={(e) => setTxSearch(e.target.value)}
-                className="pl-8 pr-7 py-1 text-[12px] border border-ink-200 rounded-md focus:outline-none focus:ring-1 focus:ring-forest-600 bg-cream-100/50 w-64"
+                className="pl-7 pr-7 py-1 text-[11.5px] border border-ink-200 rounded focus:outline-none focus:ring-1 focus:ring-forest-600 w-44 sm:w-56 bg-cream-100/30"
               />
               {txSearch && (
                 <button
+                  type="button"
                   onClick={() => setTxSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700 cursor-pointer"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700 p-0.5 cursor-pointer"
+                  title="Clear search"
                 >
                   <X size={12} />
                 </button>
@@ -611,10 +824,10 @@ export default function Inventory() {
         </div>
 
         {txLoading ? (
-          <div className="py-4 text-center text-ink-400 text-[12px] animate-pulse">Loading transaction records from PostgreSQL...</div>
+          <div className="py-4 text-center text-ink-400 text-[12px] animate-pulse">Loading transaction records from Database...</div>
         ) : recentTransactions.length === 0 ? (
           <p className="text-[12px] text-ink-400 py-3 text-center">
-            {txSearch ? `No historical transactions match "${txSearch}".` : 'No transactions recorded yet in PostgreSQL.'}
+            {txSearch ? `No historical transactions match "${txSearch}".` : 'No transactions recorded yet in Database.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -692,6 +905,22 @@ export default function Inventory() {
           </div>
         )}
       </div>
+
+      {/* Edit Warehouse Inventory Modal */}
+      {editModalOpen && editingItem && (
+        <EditInventoryModal
+          open={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false);
+            setEditingItem(null);
+          }}
+          item={editingItem}
+          onSaved={() => {
+            triggerRefresh();
+            loadInventory();
+          }}
+        />
+      )}
 
       {/* Transaction Modal */}
       {txModalOpen && (

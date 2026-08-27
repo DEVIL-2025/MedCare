@@ -56,7 +56,7 @@ export default function Alerts() {
     setActionError(null);
     try {
       await api.handleAlertAction(alertId, action, notes);
-      setActionSuccess(`Alert ${alertId} updated (${action}) successfully in PostgreSQL.`);
+      setActionSuccess(`Alert ${alertId} updated (${action}) successfully in Database.`);
       triggerRefresh();
       await loadAlerts();
       setTimeout(() => {

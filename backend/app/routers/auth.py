@@ -15,7 +15,9 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 
 class LoginRequest(BaseModel):
-    identifier: str  # Can be email OR user_id
+    identifier: Optional[str] = None  # Can be email OR user_id
+    email: Optional[str] = None
+    username: Optional[str] = None
     password: str
 
 
@@ -46,7 +48,10 @@ async def login(
     Authenticates a user via Email or User ID and Password.
     Returns JWT access token with user profile, role, and permission capabilities.
     """
-    clean_identifier = payload.identifier.strip()
+    raw_ident = payload.identifier or payload.email or payload.username or ""
+    clean_identifier = raw_ident.strip()
+    if not clean_identifier:
+        raise HTTPException(status_code=400, detail="Email, username, or user ID is required.")
     client_ip = request.client.host if request.client else "unknown"
 
     # Query user by email OR user_id (case-insensitive)

@@ -5,7 +5,7 @@ import { api } from '../../api/client';
 const INITIAL_MESSAGE = {
   id: 'init-1',
   sender: 'assistant',
-  text: 'Hello! I am your MedCare SCM Control Tower AI Assistant, connected live to PostgreSQL.\n\nAsk me about real-time inventory levels, ML demand forecasts, FEFO near-expiry batches, replenishment recommendations, active alerts, or distribution center capacities.',
+  text: 'Hello! I am your MedCare SCM Control Tower AI Assistant, connected live to Database.\n\nAsk me about real-time inventory levels, ML demand forecasts, FEFO near-expiry batches, replenishment recommendations, active alerts, or distribution center capacities.',
   category: 'System',
   timestamp: new Date(),
   suggested_actions: [
@@ -158,7 +158,7 @@ export default function ChatWidget({ isOpen, onClose }) {
                     Live Grounded
                   </span>
                 </div>
-                <p className="text-[11px] text-cream-200/80">PostgreSQL + Gemini 2.0 Flash</p>
+                <p className="text-[11px] text-cream-200/80">Database + Gemini 2.0 Flash</p>
               </div>
             </div>
 
@@ -236,7 +236,7 @@ export default function ChatWidget({ isOpen, onClose }) {
             {loading && (
               <div className="flex items-center gap-2 text-ink-500 bg-white border border-ink-100 rounded-lg rounded-tl-none p-3 max-w-[80%] shadow-card">
                 <Sparkles size={14} className="text-forest-600 animate-spin" />
-                <span className="text-[11.5px] italic">Consulting PostgreSQL & Gemini...</span>
+                <span className="text-[11.5px] italic">Consulting Database & Gemini...</span>
               </div>
             )}
 

@@ -37,14 +37,14 @@ class Settings(BaseSettings):
     @property
     def sync_database_url(self) -> str:
         if self.DATABASE_URL:
-            url = self.DATABASE_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
+            url = self.DATABASE_URL.replace("+asyncpg", "")
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql://", 1)
             return url
         if self.DB_HOST and self.DB_USER and self.DB_NAME:
             pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
             return f"postgresql://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-        return "sqlite:///./medcare_scm.db"
+        return "postgresql://postgres:postgres@localhost:5432/medcare_scm"
 
     @property
     def async_database_url(self) -> str:
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
         if self.DB_HOST and self.DB_USER and self.DB_NAME:
             pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
             return f"postgresql+asyncpg://{self.DB_USER}{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-        return "sqlite+aiosqlite:///./medcare_scm.db"
+        return "postgresql+asyncpg://postgres:postgres@localhost:5432/medcare_scm"
     
     @property
     def allowed_cors_origins(self) -> List[str]:
