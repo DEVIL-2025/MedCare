@@ -1,742 +1,322 @@
-# MedCare Pharma Supply Chain Control Tower
+# ?? MedCare Pharma SCM Control Tower
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React-19.2+-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org)
-[![Vite](https://img.shields.io/badge/Vite-8.2+-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev)
-[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4+-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
-[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0+-D71F00.svg?logo=sqlalchemy&logoColor=white)](https://www.sqlalchemy.org)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-> **Enterprise-Grade Multi-Echelon Pharmaceutical Supply Chain Intelligence & Control Platform**  
-> Unifying real-time inventory visibility, batch-level FEFO expiry management, multi-factor ML demand sensing, transfer-first network balancing, SLA-governed shortage escalations, and explainable replenishment optimization backed by a live **PostgreSQL** database.
+> **Unified Supply Chain Management Control Tower for MedCare Pharma**
+> A full-stack, real-time pharmaceutical supply chain intelligence platform built with FastAPI, React, PostgreSQL, and a suite of domain-specific business engines.
 
 ---
 
-## 📋 Table of Contents
+## ?? Table of Contents
 
-1. [Project Overview](#-project-overview)
-2. [Key Features](#-key-features)
-3. [System Architecture](#-system-architecture)
-4. [Technology Stack](#-technology-stack)
-5. [Application Modules](#-application-modules)
-6. [Database Schema & Source of Truth](#-database-schema--source-of-truth)
-7. [Data Flow Architecture](#-data-flow-architecture)
-8. [Inventory & Stock Synchronization](#-inventory--stock-synchronization)
-9. [Business SCM Workflow](#-business-scm-workflow)
-10. [User Roles & Permissions (RBAC)](#-user-roles--permissions-rbac)
-11. [API Overview](#-api-overview)
-12. [Project Structure](#-project-structure)
-13. [Prerequisites](#-prerequisites)
-14. [Installation & Setup](#-installation--setup)
-15. [Environment Variables](#-environment-variables)
-16. [Database Setup & Seeding](#-database-setup--seeding)
-17. [Running the Application](#-running-the-application)
-18. [Production & 100% Free Cloud Deployment](#-production--100-free-cloud-deployment)
-19. [Automated Testing & Pre-Flight Checks](#-automated-testing--pre-flight-checks)
-20. [Screenshots](#-screenshots)
-21. [Troubleshooting](#-troubleshooting)
-22. [Project Status](#-project-status)
-23. [Future Enhancements](#-future-enhancements)
-24. [License](#-license)
+- [Project Overview](#project-overview)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Core Engines & Modules](#core-engines--modules)
+- [Frontend Pages](#frontend-pages)
+- [API Routers](#api-routers)
+- [ML Pipeline](#ml-pipeline)
+- [Getting Started](#getting-started)
+- [Environment Variables Reference](#environment-variables-reference)
+- [Automated Testing](#automated-testing)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Project Status](#project-status)
 
 ---
 
-## 🌟 Project Overview
+## ?? Project Overview
 
-### What the System Does
-The **MedCare Pharma Supply Chain Control Tower** is a centralized decision-support and execution platform designed for multi-tier pharmaceutical distribution networks. It bridges physical distribution centers (Mother DCs, Tier-1 DCs, Regional DCs) with algorithmic intelligence to eliminate blind spots across hospital, pharmacy, and distributor fulfillment channels.
+MedCare Pharma SCM Control Tower is an end-to-end supply chain management platform designed for pharmaceutical distribution networks. It provides real-time inventory tracking, AI-driven demand forecasting, automated replenishment planning, FEFO (First Expired First Out) batch management, network balancing across distribution centres, SLA-based alert escalation, and a natural language AI assistant powered by Google Gemini.
 
-### The Business Problem It Solves
-Pharmaceutical supply chains operate under stringent regulatory constraints, cold-chain dependencies, and life-critical service level requirements. Key industry challenges addressed include:
-* **High Stockout Frequencies & Lost Sales**: Inability to anticipate sudden epidemic spikes or regional seasonal surges (e.g., flu outbreaks, monsoon ailments).
-* **Massive Expiry Waste & Write-offs**: Sub-optimal inventory consumption patterns that violate First-Expiry, First-Out (FEFO) policies.
-* **Network Stock Imbalance & Reactive Procurement**: Placing emergency purchase orders with suppliers while sister distribution centers hold surplus, near-expiry inventory.
-* **Delayed Shortage Escalations**: Lack of real-time multi-tier SLA cadences to alert operational planners and executives before stockouts impact patient care.
-* **Opaque Planning Decisions**: Traditional black-box ERP algorithms that do not provide clear operational justifications for purchase quantities or order timing.
-
-### Intended Business Roles & Users
-* **Supply Chain Planners**: Monitor daily demand velocity, review algorithmic replenishment suggestions, and schedule network transfers.
-* **Inventory & Warehouse Managers**: Manage DC capacity, execute stock receipts/adjustments, fulfill sales orders, and audit batch aging.
-* **Procurement Officers**: Approve and track purchase orders with pharmaceutical manufacturers and suppliers.
-* **Executive Leadership & CFOs**: Evaluate network inventory valuation, service levels (OTIF), expiry risk exposure, and working capital efficiency.
-* **System Administrators**: Govern role-based access, manage user provisioning, and monitor system health and audit logs.
+**Key Capabilities:**
+- **Real-time inventory monitoring** across multiple distribution centres (DCs)
+- **ML-driven demand sensing** with seasonal surge detection
+- **FEFO batch tracking** with expiry risk classification
+- **Automated replenishment** with explainable ROQ (Recommended Order Quantity) recommendations
+- **Inter-DC stock transfers** with transfer-first network balancing policy
+- **SLA escalation engine** with multi-channel alert dispatch (Email / WebSocket)
+- **What-If scenario simulation** for parametric stress testing
+- **Grounded AI Copilot** for natural language supply chain queries (Google Gemini)
+- **Role-Based Access Control (RBAC)** with JWT authentication
+- **WebSocket real-time push notifications**
 
 ---
 
-## 🚀 Key Features
+## ??? Architecture
 
-* **Executive Control Tower Dashboard**: High-level KPI aggregations (Total Inventory Value, Active Shortage Alerts, Near-Expiry Exposure, Inter-DC Balancing Savings), demand-versus-inventory trajectory forecasts, top at-risk SKU monitoring, and 1-click executive action execution.
-* **Real-Time Multi-Tier Inventory Ledger**: SKU-level and DC-level stock balance tracking (`current_stock`, `reserved_stock`, `inbound_stock`, `days_of_cover`), dynamic stock status indicators (`HEALTHY`, `LOW_STOCK`, `CRITICAL`, `OUT_OF_STOCK`, `OVERSTOCK`), and CSV export.
-* **Batch-Level FEFO Expiry Tracking**: Granular tracking of batch numbers, manufacturing dates, and expiration dates with risk stratification (`<30d Critical`, `30-60d At Risk`, `61-90d Warning`, `91-180d Watch`, `>180d Normal`).
-* **Algorithmic Demand Sensing & Surge Classifier**: Machine learning time-series regression (`RandomForestRegressor`) incorporating 90-day demand history, day-of-week seasonality, hourly patterns, and forward event overlays (+60% flu season uplift, monsoon spikes, regional promotions).
-* **Explainable Replenishment Optimizer**: Automatically computes Recommended Order Quantities (ROQ), safety stock buffers, and ordering cadences with 4-part transparent reasoning (*What*, *Why*, *When*, and *Financial/Service Impact*).
-* **Transfer-First Network Balancing Engine**: Proactively detects inter-DC transfer opportunities, prioritizing surplus and near-expiry stock from mother DCs (e.g., MUM-01) to fulfill critical deficits in regional DCs (e.g., PAT-01, DEL-02) before committing new procurement expenditure.
-* **SLA-Governed Alert Escalation Engine**: Real-time triage of stockout, shortage, and expiry risks across structured SLA response tiers (**Critical: 4 Hours**, **High: 24 Hours**, **Medium: 72 Hours**) with multi-channel dispatch logs (Email, SMS, WhatsApp).
-* **Distribution Center Network Management**: Multi-tier logistics facility tracking (capacity, space utilization %, operational health scores, coordinates, lead times) with full DC lifecycle management.
-* **Parametric What-If Scenario Simulator**: Stress-tests the supply chain against simulated demand shocks (-50% to +100%), supplier lead time delays (+0 to +14 days), and capacity bottlenecks, projecting stockout values and service level impacts over a 16-week horizon.
-* **Financial Valuation & Audit Reports**: Multi-dimensional report generator filterable by DC, category, and time window with interactive valuation curves and 1-click CSV report export.
-* **Grounded AI Supply Chain Copilot**: Context-aware assistant querying live PostgreSQL database state for instant natural-language inventory insights, shortage diagnoses, and transfer guidance.
-* **Enterprise Role-Based Access Control (RBAC) & Audit Trail**: Granular permission matrix, secure JWT authentication, password management, and immutable system audit logging.
-* **Real-Time WebSocket Event Pipeline**: Duplex communication broadcasting transaction receipts, transfer completions, alert status updates, and replenishment recalculations across all connected clients.
-
----
-
-## 🏗 System Architecture
-
-The application follows a modern decoupled client-server architecture. The asynchronous FastAPI backend coordinates domain-specific decision engines, interfacing directly with a high-performance **PostgreSQL** relational database.
-
-```mermaid
-flowchart TB
-    subgraph Frontend ["Frontend Layer (React 19 + Vite + TailwindCSS)"]
-        UI_Dash["Executive Dashboard"]
-        UI_Inv["Inventory & FEFO Ledger"]
-        UI_Demand["Demand Sensing & ML"]
-        UI_Replenish["Replenishment & Transfers"]
-        UI_Alerts["Alerts & SLA Engine"]
-        UI_Scenarios["What-If Scenario Simulator"]
-        UI_Admin["User Admin & Audit Logs"]
-        UI_Copilot["Grounded AI Copilot"]
-        StateContext["ControlTower & Auth Context"]
-    end
-
-    subgraph Transport ["API & Communication Layer"]
-        REST["REST API Endpoints (/api/*)"]
-        WS["WebSocket Event Gateway (/ws)"]
-    end
-
-    subgraph Backend ["Backend Processing Layer (FastAPI Asynchronous Framework)"]
-        Router["FastAPI Routers & Auth Middleware"]
-        
-        subgraph Engines ["Domain Decision & ML Engines"]
-            IE["InventoryEngine (Stock Balances & Validation)"]
-            FEFO["ExpiryFEFOEngine (Batch Allocation & Aging)"]
-            DSE["DemandSensingEngine (ML Forecaster & Surge Overlay)"]
-            NBE["NetworkBalancingEngine (Inter-DC Balancing)"]
-            RE["ReplenishmentEngine (ROQ & Order Frequency)"]
-            AE["AlertEscalationEngine (SLA & Notifications)"]
-            SE["ScenarioSimulationEngine (Monte Carlo & Stress Test)"]
-            AIAssistant["AssistantEngine (Grounded DB Copilot)"]
-        end
-        
-        ML["Scikit-Learn ML Model Artifact (.pkl)"]
-    end
-
-    subgraph Database ["Data & Persistence Layer (PostgreSQL 14+)"]
-        PG[(PostgreSQL Database: medcare_scm)]
-        Tables["28 Production Tables\n(Products, Warehouses, Inventory, Batches, Transactions,\nForecasts, Replenishments, Transfers, Alerts, Users, Audit Logs)"]
-        AsyncEngine["SQLAlchemy 2.0 Async (asyncpg / psycopg2)"]
-    end
-
-    Frontend <-->|HTTP / JSON| REST
-    Frontend <-->|Live Push Events| WS
-    REST --> Router
-    WS <--> Router
-    Router --> Engines
-    DSE <--> ML
-    Engines <--> AsyncEngine
-    AsyncEngine <--> PG
-    PG --- Tables
+```
+medcare-pharma-control-tower/
++-- backend/                    # FastAPI async Python backend
+�   +-- app/
+�   �   +-- config.py           # Pydantic settings
+�   �   +-- database.py         # Async SQLAlchemy engine + session
+�   �   +-- main.py             # FastAPI app entrypoint & router registration
+�   �   +-- dependencies/       # JWT auth dependency injection
+�   �   +-- engines/            # Domain-specific business logic engines
+�   �   +-- ml/                 # Machine learning pipeline
+�   �   +-- models/             # SQLAlchemy ORM models
+�   �   +-- routers/            # FastAPI route handlers
+�   �   +-- schemas/            # Pydantic request/response schemas
+�   �   +-- services/           # External service integrations
+�   �   +-- tests/              # pytest test suite
+�   �   +-- utils/              # Data seeder & utilities
+�   +-- database/               # SQL schema, seed scripts, migration utilities
++-- medcare-frontend/           # Vite + React frontend
+�   +-- src/
+�       +-- api/                # Axios API client & WebSocket client
+�       +-- components/         # Reusable UI components
+�       +-- context/            # React context (Auth, ControlTower)
+�       +-- pages/              # Application page views
+�       +-- utils/              # Frontend utilities
++-- deployment/                 # Docker & cloud platform configs
+�   +-- docker/                 # Dockerfiles (backend, frontend, fullstack)
+�   +-- cloud-platforms/        # Render, Railway, Vercel, Netlify configs
++-- docs/                       # Architecture, API, and engine documentation
 ```
 
 ---
 
-## 🛠 Technology Stack
+## ??? Tech Stack
 
-| Technology | Purpose in System | Verified Version |
+### Backend
+| Technology | Version | Purpose |
 |---|---|---|
-| **PostgreSQL** | Primary relational database, data persistence, and ultimate source of truth | `14.0+` (14 / 15 / 16) |
-| **FastAPI** | High-performance asynchronous backend web framework | `>=0.110.0` |
-| **Python** | Core backend execution runtime | `>=3.10` (3.10 / 3.11 / 3.12 / 3.13) |
-| **SQLAlchemy** | Async Object Relational Mapper (ORM) | `>=2.0.28` |
-| **asyncpg** | High-speed asynchronous PostgreSQL database driver | `>=0.29.0` |
-| **psycopg2-binary**| Synchronous PostgreSQL client and utility driver | `>=2.9.9` |
-| **aiosqlite** | High-speed zero-config SQLite driver (development fallback) | `>=0.20.0` |
-| **Pydantic / Pydantic Settings** | Request/response data validation and environment settings management | `>=2.6.0` / `>=2.2.0` |
-| **Scikit-Learn** | Machine learning engine for demand forecasting (`RandomForestRegressor`) | `>=1.4.0` |
-| **Pandas / NumPy** | Time-series data preparation, feature engineering, and matrix operations | `>=2.2.0` / `>=1.26.0` |
-| **Statsmodels** | Statistical time-series decomposition and metrics evaluation | `>=0.14.0` |
-| **WebSockets** | Real-time bi-directional event broadcast to connected clients | `>=12.0` |
-| **React** | Component-based interactive user interface framework | `^19.2.8` |
-| **Vite** | Frontend tooling, development server, and build pipeline | `^8.2.0` |
-| **Tailwind CSS** | Utility-first responsive styling and UI layout design | `^3.4.19` |
-| **React Router DOM**| Client-side routing, navigation, and protected route guards | `^7.18.2` |
-| **Recharts** | Composited responsive charts (Line, Area, Bar, Pie, Heatmaps) | `^3.10.1` |
-| **Lucide React** | Enterprise icon suite for medical and supply chain UI | `^1.33.0` |
-| **Pytest / Pytest-Asyncio** | Automated unit, integration, and ML pipeline test suite | `>=8.0.0` / `>=0.23.0` |
+| **Python** | 3.11+ | Runtime |
+| **FastAPI** | =0.110.0 | Async REST API framework |
+| **Uvicorn** | =0.28.0 | ASGI server |
+| **SQLAlchemy** | =2.0.28 | Async ORM |
+| **PostgreSQL** | 15+ | Primary database |
+| **asyncpg** | =0.29.0 | Async PostgreSQL driver |
+| **aiosqlite** | =0.20.0 | SQLite async driver (dev/test) |
+| **Pydantic v2** | =2.6.0 | Request/response validation |
+| **scikit-learn** | =1.4.0 | ML model (RandomForestRegressor) |
+| **pandas / numpy** | =2.2 / =1.26 | Feature engineering & data prep |
+| **statsmodels** | =0.14.0 | Statistical modelling |
+| **joblib** | =1.3.0 | Model serialization |
+| **PyJWT** | =2.8.0 | JWT authentication |
+| **bcrypt** | =4.0.0 | Password hashing |
+| **google-genai** | =1.0.0 | Google Gemini AI integration |
+| **websockets** | =12.0 | WebSocket support |
+| **pytest / pytest-asyncio** | =8.0 / =0.23 | Test framework |
 
----
-
-## 📦 Application Modules
-
-### 1. Executive Dashboard (`/`)
-* **Live DC Filter & Aggregated Rollup**: Filter by specific Distribution Center (e.g., `MUM-01`, `DEL-02`, `PAT-01`) or view the unified network rollup (`All`).
-* **Executive SCM KPIs**: Real-time computation of Total Inventory Value, Active Shortage Alerts, Near-Expiry Risk Exposure, and Inter-DC Transfer Savings.
-* **Demand vs. Inventory Trajectory Curve**: Visualizes 8 weeks of historical actual demand, 4 weeks of forward ML forecasted demand, and projected stock trajectory.
-* **1-Click Recommendation Action Handler**: Direct button to execute prioritized inter-DC stock balancing or approve critical replenishment orders.
-* **Top At-Risk SKUs & Facility Health Grid**: Real-time listing of critically low items and operational health scores for all DCs.
-
-### 2. Real-Time Inventory & FEFO Ledger (`/inventory`)
-* **Product Catalog & SKU Rollup**: Filterable multi-echelon table displaying current physical stock, reserved stock, inbound transit stock, ROP, safety stock, and days of cover.
-* **Add New Product Modal**: Commission new pharmaceutical SKUs with therapeutic category, unit cost, shelf life, minimum order quantity (MOQ), and threshold settings.
-* **Record Sale Modal**: Process customer or hospital sales orders with atomic inventory deductions and automatic FEFO batch allocation.
-* **Record Stock Transaction Modal**: Execute Receipts, Adjustments, Consumptions, and Transfers with validation against zero stockouts.
-* **Batch Aging & Financial Value Breakdown**: Visual summary of batch aging tiers (`0-30d`, `31-60d`, `61-90d`, `91-180d`, `180+d`) and total capital at risk.
-* **Historical Audit Ledger**: Searchable, time-stamped log of all stock movements with previous/new balances and operator attribution.
-
-### 3. Sensed Demand Forecasting (`/demand-forecast`)
-* **Multi-Factor Demand Sensing Signals**: Real-time signal overlay cards (e.g., Flu season epidemic, monsoon respiratory surge, regional festival stockpile) displaying impact percentages and algorithm confidence scores.
-* **ML Model Lineage & Transparency**: Full inspection panel detailing active algorithm (`RandomForestRegressor`), training samples, temporal train/val split, R² score, MAE, RMSE, and WAPE error metrics.
-* **Ordering Velocity Patterns**: Visual day-of-week and hourly ordering velocity heatmaps.
-* **Pipeline Controls**: Action triggers to manually run demand forecast updates or retrain the machine learning model on updated sales history.
-
-### 4. Replenishment & Network Balancing Optimizer (`/replenishment`)
-* **Overview Tab**: Sensed replenishment recommendations with explainable 4-part justifications (*What*, *Why*, *When*, *Impact*), Recommended Order Quantity (ROQ), suggested order frequency, and 1-click Approve/Reject handlers.
-* **Inter-DC Transfers Tab**: Discovered stock rebalancing opportunities matching excess/near-expiry stock in mother DCs with shortage nodes, showing estimated logistics savings in INR.
-* **Purchase Orders Tab**: Historical and active supplier purchase orders with vendor names, quantities, unit prices, ETAs, and fulfillment statuses.
-* **FEFO Batches Tab**: Granular inspection of active batches across warehouses with remaining shelf life and available quantities.
-* **Parameter Configuration Tab**: View and adjust target service levels, lead time buffers, and approval financial thresholds.
-
-### 5. Alert & Escalation Engine (`/alerts`)
-* **SLA-Tiered Shortage Alerts**: Severity grouping across **Critical (4h SLA)**, **High (24h SLA)**, and **Medium (72h SLA)** with real-time countdown timers.
-* **Triage Action Handlers**: "Acknowledge", "Escalate SLA Tier", and "Mark Resolved" workflows updating database records and broadcasting push notifications.
-* **Root Cause Diagnostics**: Root cause breakdowns (e.g., Sudden Demand Surge, Delayed Inbound Shipment, Expiry Depletion) with dynamic distribution charts.
-* **Escalation Audit History**: Log of all tier escalations, designated owners, and SLA compliance timestamps.
-
-### 6. Distribution Centers & Logistics Facilities (`/warehouses`)
-* **Facility Network Grid**: Operational metrics across all distribution hubs, including physical storage capacity, utilization percentage, health score, and lead times.
-* **Add / Edit Facility Modal**: Commission, reconfigure, or update storage capacity and geographic map coordinates for any warehouse node.
-* **Geographic Network Map**: Interactive spatial visualization of warehouse hubs and logistics supply routes.
-
-### 7. Financial ROI & Valuation Audit (`/reports`)
-* **Multi-Dimensional Query Filters**: Filter analytical reports by Report Type, Distribution Center, Therapeutic Category, and Time Window (7, 14, 30, or 90 days).
-* **Live Inventory Valuation Curve**: Time-series curve tracking total inventory value versus capital exposed to near-expiry write-offs.
-* **1-Click CSV Export**: Download formatted operational and financial audit reports for executive presentations.
-
-### 8. What-If Scenario Simulator (`/scenario-simulator`)
-* **Parametric Stress-Testing Controls**: Sliders to simulate demand shocks (-50% to +100%), supplier lead-time delays (0 to +14 days), initial inventory shocks, and DC capacity constraints.
-* **Comparative Baseline vs. Shock Analysis**: Direct comparison of projected stockout SKUs, financial stockout losses, average customer service level %, and replenishment capital required.
-* **16-Week Projected Trajectory**: Line graph tracking projected inventory levels and stockout occurrences over a 4-month horizon.
-* **Scenario History Log**: Historical repository of previous simulation runs for strategic planning review.
-
-
-### 9. User Management, RBAC & Audit Trail (`/users` — Admin Only)
-* **Account Administration**: Create, update, activate/deactivate user accounts, and assign user roles (`ADMIN` or `MANAGER`).
-* **Password Management**: Administrative password reset modal with temporary credential generation.
-* **Immutable System Audit Logs (`/api/audit-logs`)**: Searchable audit log capturing every administrative mutation, affected module, entity ID, before/after values, client IP address, and UTC timestamp.
-
-### 10. System Settings (`/settings`)
-* **SCM Engine Configuration**: Administrative interface to inspect and configure global operational parameters (e.g., Service Level targets, Lead Time Buffers, Expiry Warning Thresholds, Auto-Approval Financial Limits).
-
----
-
-## 🗄 Database Schema & Source of Truth
-
-The **PostgreSQL database (`medcare_scm`)** is the ultimate source of truth for all business-critical state, historical transactions, machine learning inputs, and audit trails.
-
-### Core Database Tables (28 Relational Entities)
-
-```mermaid
-erDiagram
-    products ||--o{ inventory : "stocks"
-    products ||--o{ batches : "contains"
-    products ||--o{ inventory_transactions : "logs"
-    products ||--o{ sales_orders : "fulfills"
-    products ||--o{ demand_history : "records"
-    products ||--o{ forecasts : "projects"
-    products ||--o{ replenishment_recommendations : "generates"
-    products ||--o{ purchase_orders : "procures"
-    products ||--o{ inventory_transfers : "moves"
-    products ||--o{ alerts : "triggers"
-
-    warehouses ||--o{ inventory : "houses"
-    warehouses ||--o{ batches : "stores"
-    warehouses ||--o{ inventory_transactions : "audits"
-    warehouses ||--o{ sales_orders : "ships_from"
-    warehouses ||--o{ forecasts : "forecasted_at"
-    warehouses ||--o{ replenishment_recommendations : "replenishes"
-    warehouses ||--o{ purchase_orders : "receives"
-    warehouses ||--o{ inventory_transfers : "source_or_dest"
-    warehouses ||--o{ alerts : "originates_at"
-
-    alerts ||--o{ escalations : "escalates_to"
-    alerts ||--o{ notifications : "dispatches"
-    
-    scenarios ||--o{ scenario_results : "produces"
-
-    roles ||--o{ role_permissions : "grants"
-    permissions ||--o{ role_permissions : "assigned_to"
-    roles ||--o{ users : "governs"
-```
-
-| Table Name | Primary Key | Purpose & Business Logic |
+### Frontend
+| Technology | Version | Purpose |
 |---|---|---|
-| **`products`** | `sku` (VARCHAR) | Master catalog of pharmaceutical SKUs, therapeutic categories, shelf lives, unit costs, MOQs, and default ROP/safety stock thresholds. |
-| **`warehouses`** | `id` (VARCHAR) | Multi-tier distribution centers (Mother DC, Tier-1 DC, Tier-2 DC), capacity in units, utilization %, health scores, and lead times. |
-| **`inventory`** | `id` (SERIAL) | Dynamic inventory balances per SKU per DC (`current_stock`, `reserved_stock`, `inbound_stock`, `days_of_cover`, status, risk level). Unique constraint on `(sku, warehouse_id)`. |
-| **`batches`** | `id` (VARCHAR) | Granular batch-level tracking with manufacturing date, expiration date, quantity, status (`ACTIVE`, `NEAR_EXPIRY`, `EXPIRED`, `DEPLETED`), and quarantine flags. |
-| **`inventory_transactions`** | `id` (SERIAL) | Immutable audit trail for all stock mutations (`SALE`, `RECEIPT`, `ADJUSTMENT`, `TRANSFER_OUT`, `TRANSFER_IN`, `CONSUMPTION`) with before/after balances. |
-| **`sales_orders`** | `id` (VARCHAR) | Hospital, distributor, and pharmacy customer sales orders fulfilled through the network. |
-| **`demand_history`** | `id` (SERIAL) | Historical daily sales volume and unfulfilled demand time-series used for ML training and baseline calculation. |
-| **`distributor_orders`**| `id` (VARCHAR) | Forward purchase orders placed by external regional distributors. |
-| **`seasonal_events`** | `id` (SERIAL) | Forward epidemiological and seasonal event overlays (e.g., Flu Season +60% uplift, Monsoon Surge). |
-| **`promotions`** | `id` (SERIAL) | Planned commercial promotions and trade discount uplifts. |
-| **`demand_signals`** | `id` (VARCHAR) | Sensed demand intelligence signals with confidence ratings and percentage impact factors. |
-| **`forecasts`** | `id` (SERIAL) | Forward 30-day ML-generated demand forecasts with upper/lower 87% confidence bounds. |
-| **`demand_surge_events`**| `id` (SERIAL) | Detected rapid-onset demand surges exceeding baseline thresholds (+25%). |
-| **`inventory_risk`** | `id` (SERIAL) | Computed stockout risk scores (0-100), estimated stockout dates, and near-expiry exposure metrics. |
-| **`replenishment_recommendations`** | `id` (VARCHAR) | Algorithmic purchase recommendations with Recommended Order Quantity (ROQ), review cadences, and 4-part explainable justifications. |
-| **`purchase_orders`** | `id` (VARCHAR) | Approved supplier procurement orders with supplier names, quantities, costs in INR, and ETAs. |
-| **`inventory_transfers`** | `id` (VARCHAR) | Inter-DC stock rebalancing transfers with source DC, destination DC, allocated batch, transfer lead time, and estimated cost savings. |
-| **`alerts`** | `id` (VARCHAR) | Active supply chain risk alerts categorized by severity (`CRITICAL`, `HIGH`, `MEDIUM`), SLA due timestamps, root causes, and recommended actions. |
-| **`escalations`** | `id` (VARCHAR) | SLA escalation logs tracking tier level changes (Level 1 ➔ Level 2 ➔ Level 3), assigned personnel, and resolution status. |
-| **`notifications`** | `id` (SERIAL) | Multi-channel dispatch records across Email, SMS, and WhatsApp. |
-| **`scenarios`** | `id` (SERIAL) | Configured parametric what-if scenario parameter sets. |
-| **`scenario_results`** | `id` (SERIAL) | Computed outcome metrics from scenario runs (stockout value, service level %, inventory holding cost, impact trend JSON). |
-| **`system_settings`** | `key` (VARCHAR) | Global algorithmic parameters, thresholds, and operational limits. |
-| **`roles`** | `id` (VARCHAR) | RBAC system roles (`ADMIN`, `MANAGER`). |
-| **`permissions`** | `id` (VARCHAR) | Granular system permission codes (e.g., `inventory.view`, `replenishment.approve`, `users.create`). |
-| **`role_permissions`** | `(role_id, permission_id)` | Many-to-many relationship mapping permissions to roles. |
-| **`users`** | `id` (VARCHAR) | User accounts with hashed passwords, active flags, login tracking, and role associations. |
-| **`audit_logs`** | `id` (VARCHAR) | Immutable security and administrative audit trail with before/after state diffs and IP addresses. |
+| **React** | ^19.2.8 | UI library |
+| **Vite** | ^8.2.0 | Build tool & dev server |
+| **React Router DOM** | ^7.18.2 | Client-side routing |
+| **Recharts** | ^3.10.1 | Data visualisation charts |
+| **Tailwind CSS** | ^3.4.19 | Utility-first CSS framework |
+| **lucide-react** | ^1.33.0 | Icon library |
 
 ---
 
-## 🔄 Data Flow Architecture
+## ?? Project Structure
 
-The data lifecycle within the MedCare Control Tower follows a strict, unidirectional validation-and-broadcast loop:
+### Backend � Business Engines (`backend/app/engines/`)
 
-```
-[ PostgreSQL Database (Source of Truth) ]
-                    │
-                    ▼ (Async SQLAlchemy ORM)
-[ Backend Engine Pipeline: ML Forecaster ➔ Risk Evaluation ➔ Replenishment Optimizer ]
-                    │
-                    ▼ (Pydantic Serialized JSON)
-[ FastAPI REST Endpoints & WebSocket Event Gateway ]
-                    │
-                    ▼ (HTTPS & WSS Protocols)
-[ React 19 Frontend UI (Stat Cards, Charts, Ledger Tables, Modals) ]
-                    │
-                    ▼ (User Interaction: Approve PO, Execute Transfer, Record Sale)
-[ API Client Request with JWT Authentication ]
-                    │
-                    ▼ (Atomic Transaction & FEFO Deduction)
-[ Backend InventoryEngine / Database Commit ]
-                    │
-                    ├───────────────────────────────────────────┐
-                    ▼                                           ▼
-[ Updated PostgreSQL State ]                  [ WebSocket Event Broadcast to All Clients ]
-```
+| Engine File | Responsibility |
+|---|---|
+| `inventory_engine.py` | Stock level evaluation, threshold calculations, status transitions |
+| `demand_sensing_engine.py` | Multi-factor demand signal processing & surge detection |
+| `expiry_fefo_engine.py` | FEFO chronological batch allocation & expiry risk classification |
+| `network_balancing_engine.py` | Surplus matching, inter-DC transfer opportunity identification |
+| `replenishment_engine.py` | ROQ computation, review frequencies, purchase order constraints |
+| `alert_escalation_engine.py` | SLA countdown timers (Critical 4h / High 24h / Medium 72h) |
+| `scenario_simulation_engine.py` | Parametric stress-testing & 16-week outcome modelling |
+| `risk_engine.py` | Composite risk scoring across inventory, expiry, and demand signals |
 
-1. **State Hydration**: On application load or warehouse filter change, the frontend fetches structured JSON state from FastAPI REST endpoints (`/api/dashboard`, `/api/inventory`, `/api/replenishment`, `/api/alerts`).
-2. **Dynamic Algorithmic Evaluation**: Backend engines calculate real-time Days of Cover (`current_stock / sensed_daily_demand`), stockout risk levels, and inter-DC transfer viability dynamically against live database records.
-3. **User Action Dispatch**: When an operator records a sale, approves an order, or executes a transfer, the frontend dispatches an authenticated POST/PUT request.
-4. **Atomic Transaction & Validation**: The backend executes the operation inside a single database transaction, adjusting inventory balances, reallocating batch quantities, logging immutable audit rows, and recalculating dependent risk scores.
-5. **Real-Time Push Broadcast**: Upon transaction commit, the WebSocket manager emits an event payload (e.g., `TRANSFER_EXECUTED`, `REPLENISHMENT_UPDATED`) to all connected browser sessions for zero-refresh synchronization.
+### Backend � Services (`backend/app/services/`)
 
----
+| Service File | Responsibility |
+|---|---|
+| `auth_service.py` | JWT token creation, validation, password hashing |
+| `audit_service.py` | Audit log recording for compliance |
+| `gemini_service.py` | Google Gemini AI API integration for the AI Copilot |
+| `email_service.py` | Transactional email dispatch |
+| `email_alert_service.py` | Periodic email alert scheduler for SLA escalations |
+| `notification_service.py` | In-app notification management |
 
-## ⚡ Inventory & Stock Synchronization
+### Backend � ORM Models (`backend/app/models/`)
 
-### Inter-DC Transfer Mechanics
-The system implements a **Transfer-First Network Policy**. Rather than defaulting to new external supplier procurement, the engine detects surplus or near-expiry batches in high-capacity Mother DCs (e.g., Mumbai Central `MUM-01`) and schedules stock balancing transfers to regional nodes facing stockouts (e.g., Patna Regional `PAT-01`).
+`alert`, `auth`, `batch`, `demand`, `escalation`, `forecast`, `inventory`, `notification`, `product`, `replenishment`, `risk`, `sales`, `scenario`, `settings`, `signal`, `supplier`, `transaction`, `transfer`, `warehouse`
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as SCM Planner / Manager
-    participant UI as React Control Tower
-    participant API as FastAPI Backend
-    participant Engine as Inventory & Network Engine
-    participant DB as PostgreSQL Database
-    participant WS as WebSocket Gateway
+### Backend � Database (`backend/database/`)
 
-    User->>UI: Click "Execute Transfer" (TRF-P-1042-MUM-01-PAT-01)
-    UI->>API: POST /api/transfers/{id}/execute
-    API->>Engine: process_transaction(TRANSFER_OUT & TRANSFER_IN)
-    
-    critical Atomic Database Transaction
-        Engine->>DB: 1. Deduct quantity from Source DC (MUM-01)
-        Engine->>DB: 2. Decrement Source Batches via FEFO Order
-        Engine->>DB: 3. Add quantity to Destination DC (PAT-01)
-        Engine->>DB: 4. Create/Update Destination Batches
-        Engine->>DB: 5. Insert 2 audit rows in inventory_transactions
-        Engine->>DB: 6. Update transfer record status = 'COMPLETED'
-        Engine->>DB: 7. Recalculate status & risk for both DCs
-        Engine->>DB: 8. Synchronize alerts & replenishment recommendations
-        DB-->>Engine: Commit Confirmed
-    end
+| File | Purpose |
+|---|---|
+| `schema.sql` | PostgreSQL DDL � full table schema with constraints and indexes |
+| `seed.sql` | Initial seed data |
+| `connect_and_migrate.py` | Database migration & connection utility |
+| `seed_fefo_test_data.py` | FEFO-specific test data seeder |
+| `verify_live_postgres.py` | Live PostgreSQL connectivity verification |
+| `verify_audit_suite.py` | Audit trail verification suite |
 
-    Engine->>WS: Broadcast TRANSFER_EXECUTED & REPLENISHMENT_UPDATED
-    WS-->>UI: Push Live Notification
-    API-->>UI: Return Success Response
-    UI->>User: Display Success Notification & Instantly Update Ledger
-```
+### Frontend � Pages (`medcare-frontend/src/pages/`)
 
-### Verified Transfer Behavior in Code
-1. **Source DC Stock Deduction**: `current_stock` is atomically decremented by the transfer quantity.
-2. **FEFO Batch Allocation at Source**: Batches in the source DC are depleted in strict chronological order of earliest expiry date (`expiry_date.asc()`). Depleted batches are marked `DEPLETED`.
-3. **Destination DC Stock Addition**: `current_stock` is atomically incremented by the transfer quantity.
-4. **Batch Continuity at Destination**: The transferred batch is registered or updated in the destination warehouse, preserving the original manufacturing and expiration dates.
-5. **Dual Audit Logging**: Two structured rows are logged in `inventory_transactions` (`TRANSFER_OUT` with negative quantity and `TRANSFER_IN` with positive quantity).
-6. **Live Risk Recalculation**: Days of cover and risk levels are immediately refreshed across both distribution centers.
+| Page | Description |
+|---|---|
+| `Login.jsx` | Authentication page with JWT login |
+| `Dashboard.jsx` | Executive Control Tower � KPI stat cards, trajectory charts, facility health grid |
+| `Inventory.jsx` | Real-time inventory & FEFO ledger � SKU breakdown, batch aging, audit trail |
+| `DemandForecast.jsx` | Demand sensing & ML forecast visualisation |
+| `Replenishment.jsx` | Replenishment planner & ROQ recommendations |
+| `Alerts.jsx` | Alert & SLA escalation console |
+| `ScenarioSimulator.jsx` | What-If parametric stress-testing simulator |
+| `Reports.jsx` | Financial valuation & CSV export reports |
+| `Warehouses.jsx` | Distribution centre management & capacity tracking |
+| `UserManagement.jsx` | RBAC user administration |
+| `Settings.jsx` | Application settings & configuration |
+
+### Frontend � Components (`medcare-frontend/src/components/`)
+
+Organised into sub-folders: `assistant/`, `auth/`, `inventory/`, `layout/`, `transactions/`, `ui/`, `warehouses/`
 
 ---
 
-## 💼 Business SCM Workflow
+## ?? Core Engines & Modules
 
-```mermaid
-stateDiagram-v2
-    [*] --> DemandSensing: Ingest Historical Sales & Epidemic Overlays
-    DemandSensing --> RiskEvaluation: Compute Sensed Daily Demand & DOC
-    
-    state RiskEvaluation {
-        [*] --> CheckStockLevel
-        CheckStockLevel --> Healthy: Stock > ROP
-        CheckStockLevel --> ShortageDetected: Stock < ROP or DOC < Lead Time
-        CheckStockLevel --> NearExpiryDetected: Batch Expiry < 90 Days
-    }
+### ?? Inventory Engine
+Evaluates real-time stock levels against safety stock thresholds. Performs status transitions (Healthy ? Low ? Critical) and calculates days-of-stock-remaining.
 
-    ShortageDetected --> NetworkBalancing: Evaluate Transfer-First Policy
-    NearExpiryDetected --> NetworkBalancing: Flag Near-Expiry Batches for Rebalancing
+### ?? Demand Sensing Engine
+Multi-factor demand signal aggregation with:
+- Seasonal event factor multiplication (flu season: +60% uplift)
+- Surge detection threshold at +25% above baseline
+- ML model transparency with feature importance reporting
 
-    state NetworkBalancing {
-        [*] --> SearchSurplusNodes
-        SearchSurplusNodes --> TransferViable: Excess Stock Found in Sister DC
-        SearchSurplusNodes --> ProcurementRequired: No Network Surplus Available
-    }
+### ?? FEFO Expiry Engine
+First Expired First Out batch allocation engine with:
+- Chronological batch allocation order enforcement
+- Expiry risk classification: **Critical** (=30 days), **At Risk** (=90 days), **Watch** (=180 days)
+- Expired batch filtering and aging risk calculations
 
-    TransferViable --> ExecuteTransfer: Planner Approves Inter-DC Transfer
-    ExecuteTransfer --> StockUpdated: Atomically Balance Inventories via FEFO
-    
-    ProcurementRequired --> ReplenishmentPO: SCM Engine Recommends PO (ROQ)
-    ReplenishmentPO --> PurchaseOrderCreated: Planner Approves Recommendation
-    PurchaseOrderCreated --> InboundReceipt: Supplier Fulfills Order
-    InboundReceipt --> StockUpdated: Atomically Increment Physical Stock
-    
-    StockUpdated --> AlertResolved: Risk Mitigated & Alerts Cleared
-    AlertResolved --> [*]
-```
+### ?? Network Balancing Engine
+Inter-DC stock balancing with transfer-first policy:
+- Surplus identification & demand matching across DCs
+- Transfer opportunity scoring with estimated savings calculation
+- Atomic dual-DC stock synchronisation on transfer approval
+
+### ?? Replenishment Engine
+Explainable Recommended Order Quantity (ROQ) calculations:
+- Economic Order Quantity (EOQ) model
+- Safety stock based on service level (95%) and lead time buffer
+- 4-part justification: demand, lead time, safety stock, batch rounding
+- Financial approval tiers: Auto (=?1L), Manager (=?5L), Director (>?5L)
+
+### ?? Alert & SLA Escalation Engine
+SLA countdown-based escalation pipeline:
+- **Critical**: 4-hour response SLA
+- **High**: 24-hour response SLA
+- **Medium**: 72-hour response SLA
+- Multi-channel dispatch: Email (Resend / SMTP) + WebSocket push
+
+### ?? Scenario Simulation Engine
+Parametric what-if stress testing with:
+- Adjustable demand multiplier, lead time, and stockout probability inputs
+- 16-week projected stockout trajectory
+- Side-by-side baseline vs. scenario metric comparison
+
+### ?? AI Copilot (Google Gemini)
+Database-grounded natural language query engine powered by Google Gemini:
+- Answers supply chain questions in plain English
+- Queries live database context to ground responses
+- Integrated as the `assistant` router and `gemini_service.py`
 
 ---
 
-## 👥 User Roles & Permissions (RBAC)
+## ?? API Routers
 
-The application enforces role-based access control backed by the `roles`, `permissions`, `role_permissions`, and `users` database tables:
+All routes are registered under `/api/` prefix unless noted.
 
-| Role | Description | Accessible Modules & Permissions |
+| Router Module | Prefix | Description |
 |---|---|---|
-| **`ADMIN`** | Full administrative, security, and operational authority across the entire platform. | Full access to all 36 permissions: Dashboard, Inventory (including SKU deletion), Demand Sensing & Model Retraining, Replenishment & Approvals, Alerts & Escalations, Facility Management, Reports & CSV Export, User Account Creation/Editing/Deactivation, System Settings Configuration, Database Diagnostics, and Immutable Audit Logs. |
-| **`MANAGER`** | Operational supply chain planner and inventory controller. | Operational access across Dashboard, Inventory View & Transactions, Record Sales, Demand Forecast Inspection, Replenishment PO Approvals/Rejections, Transfer Execution, Alerts Triage & Escalation, Facility Capacity Viewing, Reports Analytics & CSV Export. *(Restricted from User Management, System Parameter Configuration, Model Retraining, and Product Master Catalog Deletion).* |
+| `auth.py` | `/api/auth` | Login, token refresh, logout |
+| `users.py` | `/api/users` | User CRUD & role management |
+| `dashboard.py` | `/api/dashboard` | Aggregated KPI & dashboard data |
+| `inventory.py` | `/api/inventory` | Inventory CRUD, batch management |
+| `transactions.py` | `/api/transactions` | Inventory transaction ledger |
+| `demand.py` | `/api/demand` | Demand signals & history |
+| `forecasts.py` | `/api/forecasts` | ML forecast generation & training |
+| `replenishment.py` | `/api/replenishment` | ROQ recommendations & purchase orders |
+| `transfers.py` | `/api/transfers` | Inter-DC stock transfer management |
+| `alerts.py` | `/api/alerts` | Alert lifecycle & escalation |
+| `warehouses.py` | `/api/warehouses` | DC management & capacity |
+| `scenarios.py` | `/api/scenarios` | What-if simulation runs |
+| `reports.py` | `/api/reports` | CSV report generation |
+| `settings.py` | `/api/settings` | Application settings |
+| `notifications.py` | `/api/notifications` | In-app notification feed |
+| `metrics.py` | `/api/metrics` | Operational metrics |
+| `assistant.py` | `/api/assistant` | Gemini AI Copilot queries |
+| `suppliers.py` | `/api/suppliers` | Supplier management |
+| `ws.py` | `/ws` | WebSocket real-time push channel |
 
-### Default Pre-Configured Seed Users
-The database seeder provisions standard demo accounts (credentials configured in `backend/app/config.py` and `backend/app/utils/data_seeder.py`):
-* **Admin User**: Username `admin` | Email `admin@medcarepharma.com` | Role `ADMIN`
-* **Manager User**: Username `manager` | Email `manager@medcarepharma.com` | Role `MANAGER`
-* **Regional Planner**: Username `aditi.rao` | Email `aditi.rao@medcarepharma.com` | Role `MANAGER`
-
----
-
-## 📡 API Overview
-
-The FastAPI backend exposes structured REST endpoints and WebSocket channels:
-
-| Category | Method | Endpoint | Description |
-|---|---|---|---|
-| **Authentication** | `POST` | `/api/auth/login` | Authenticate user credentials and return JWT bearer token |
-| | `GET` | `/api/auth/me` | Retrieve profile and permission set for authenticated user |
-| | `POST` | `/api/auth/change-password` | Change password for active user session |
-| | `POST` | `/api/auth/logout` | Invalidate active user session |
-| **User Admin** | `GET` | `/api/users` | List system users with pagination and role filters (*Admin only*) |
-| | `POST` | `/api/users` | Register new user account (*Admin only*) |
-| | `PUT` | `/api/users/{id}` | Update existing user details or role assignment (*Admin only*) |
-| | `POST` | `/api/users/{id}/reset-password` | Reset password for target user (*Admin only*) |
-| | `POST` | `/api/users/{id}/toggle-status` | Activate or deactivate user account (*Admin only*) |
-| | `GET` | `/api/users/roles` | List available system roles (*Admin only*) |
-| | `GET` | `/api/audit-logs` | Retrieve immutable system audit log records (*Admin only*) |
-| **Dashboard** | `GET` | `/api/dashboard` | Executive KPI summary, demand vs stock trajectory, at-risk SKUs |
-| **Inventory** | `GET` | `/api/inventory` | Query multi-tier inventory balances, ROPs, safety stocks, and DOC |
-| | `GET` | `/api/inventory/products` | Retrieve master product catalog |
-| | `POST` | `/api/inventory/products` | Commission new pharmaceutical SKU |
-| | `DELETE`| `/api/inventory/products/{sku}`| Decommission / archive product SKU (*Admin only*) |
-| | `POST` | `/api/inventory/sales` | Record customer sale and execute atomic FEFO batch deduction |
-| | `GET` | `/api/inventory/batches` | Query active batches, expiration dates, and aging risk buckets |
-| | `GET` | `/api/inventory/categories` | List distinct therapeutic product categories |
-| **Transactions** | `GET` | `/api/transactions` | Query historical inventory transaction ledger |
-| | `POST` | `/api/transactions` | Execute atomic stock transaction (`RECEIPT`, `ADJUSTMENT`, etc.) |
-| **Demand & ML** | `GET` | `/api/demand/signals` | List active multi-factor demand sensing signals |
-| | `GET` | `/api/demand/day-of-week` | Weekly ordering distribution profile |
-| | `GET` | `/api/demand/heatmap` | Hourly demand intensity heatmap matrix |
-| | `GET` | `/api/demand/drivers` | Analysis of primary demand acceleration factors |
-| | `GET` | `/api/demand/events` | Forward seasonal and epidemiological event calendar |
-| | `GET` | `/api/forecasts` | Forward 30-day ML demand forecasts with confidence intervals |
-| | `POST` | `/api/forecasts/run` | Trigger dynamic demand forecast recalculation |
-| | `POST` | `/api/forecasts/train` | Retrain Scikit-Learn regression model on demand history (*Admin only*) |
-| | `GET` | `/api/forecasts/model-info` | Active ML model metadata, version, and training lineage |
-| | `GET` | `/api/forecasts/model-transparency` | Model accuracy metrics (R², RMSE, MAE, WAPE) & feature importances |
-| **Replenishment**| `GET` | `/api/replenishment` | Sensed replenishment recommendations and purchase orders list |
-| | `GET` | `/api/replenishment/fefo-batches`| Inspect FEFO batch allocations across warehouses |
-| | `POST` | `/api/replenishment/{id}/approve` | Approve recommendation and create purchase order |
-| | `POST` | `/api/replenishment/{id}/reject` | Reject recommendation with justification note |
-| | `POST` | `/api/replenishment/{id}/acknowledge` | Acknowledge recommendation review |
-| | `POST` | `/api/replenishment/{id}/complete` | Mark recommendation resolved |
-| **Transfers** | `GET` | `/api/transfers` | Discovered inter-DC stock rebalancing opportunities |
-| | `POST` | `/api/transfers/{id}/execute` | Atomically execute inter-DC stock transfer |
-| | `POST` | `/api/transfers/{id}/approve` | Approve and dispatch inter-DC transfer |
-| **Alerts & SLA** | `GET` | `/api/alerts` | Active stockout, shortage, and expiry alerts with SLA timers |
-| | `POST` | `/api/alerts/{id}/action` | Execute alert triage action (`ACKNOWLEDGE`, `RESOLVE`, `ESCALATE`)|
-| | `GET` | `/api/alerts/escalations` | SLA escalation audit history |
-| **Warehouses** | `GET` | `/api/warehouses` | Distribution center network list, capacities, and health scores |
-| | `POST` | `/api/warehouses` | Register new distribution facility (*Admin only*) |
-| | `PUT` | `/api/warehouses/{id}` | Update DC capacity, tier, or coordinates (*Admin only*) |
-| | `DELETE`| `/api/warehouses/{id}` | Decommission distribution facility (*Admin only*) |
-| **Scenarios** | `POST` | `/api/scenarios/run` | Execute parametric Monte Carlo / stress-test simulation |
-| | `GET` | `/api/scenarios/history` | Query past scenario simulation results |
-| **Reports** | `GET` | `/api/reports/summary` | Multi-dimensional financial valuation and service level analytics |
-| **Settings** | `GET` | `/api/settings` | Read active algorithmic parameters and business thresholds |
-| | `PUT` | `/api/settings` | Update global SCM engine parameters (*Admin only*) |
-| **Notifications**| `GET`| `/api/notifications` | Query multi-channel dispatch audit log |
-| | `POST` | `/api/notifications/send` | Dispatch manual operational notification |
-| **AI Copilot** | `POST` | `/api/assistant/chat` | Natural-language query interface grounded in live database |
-| **Health** | `GET` | `/health` | Microservice and engi```
-medcare-pharma-control-tower-main/
-├── .env.example                     # Environment template with PostgreSQL & app settings
-├── README.md                        # Master project documentation
-├── requirements.txt                 # Root Python dependencies
-├── deployment/                      # 🚀 Production & 100% Free Hosting Deployment Center
-│   ├── README.md                    # Master deployment overview & quick-start
-│   ├── FREE_HOSTING_STEP_BY_STEP.md # Step-by-step free hosting tutorial (Vercel + Render + Neon)
-│   ├── .env.free-tier.example       # 100% Free Tier environment template
-│   ├── .env.production.example      # Production enterprise environment template
-│   ├── docker/                      # Container definitions & compose manifests
-│   │   ├── Dockerfile.backend       # Multi-stage Python 3.12 FastAPI backend container
-│   │   ├── Dockerfile.frontend      # React Vite build + Nginx Alpine web server
-│   │   ├── Dockerfile.fullstack     # Unified single-container image (FastAPI + built React SPA)
-│   │   ├── docker-compose.yml       # 3-tier local/staging stack (PostgreSQL + Backend + Frontend)
-│   │   ├── docker-compose.prod.yml  # Hardened production stack with resource limits & log rotation
-│   │   └── nginx.conf               # Production Nginx reverse proxy & SPA client router
-│   ├── cloud-platforms/             # Platform deployment configurations
-│   │   ├── render/render.yaml       # Render 1-click infrastructure blueprint
-│   │   ├── render/Procfile          # Web process runner for Render / Koyeb / Fly.io
-│   │   ├── vercel/vercel.json       # Vercel SPA client rewrite & caching configuration
-│   │   ├── netlify/netlify.toml     # Netlify build and redirect configuration
-│   │   └── railway/railway.toml     # Railway deployment configuration
-│   └── scripts/                     # Deployment automation tools
-│       ├── deploy_check.py          # Automated pre-flight deployment verification tool
-│       ├── build_fullstack.py       # 1-click builder packaging React into FastAPI
-│       ├── start_production.sh      # Linux / macOS production startup script
-│       └── start_production.bat     # Windows production startup script
-├── backend/                         # Asynchronous FastAPI backend service
-│   ├── requirements.txt             # Python backend dependencies
-│   ├── database/                    # SQL DDL schemas, seed files, and migration utilities
-│   │   ├── schema.sql               # Complete PostgreSQL DDL schema (tables, constraints, indexes)
-│   │   ├── seed.sql                 # Clean initial SQL dataset
-│   │   ├── connect_and_migrate.py   # Automated schema migration script
-│   │   └── verify_live_postgres.py  # PostgreSQL connection verification utility
-│   └── app/
-│       ├── main.py                  # FastAPI application entry point, lifespan, & router registration
-│       ├── config.py                # Pydantic settings & environment configuration
-│       ├── database.py              # Async SQLAlchemy engine & session factory
-│       ├── dependencies/            # Authentication & dependency injection
-│       │   └── auth.py              # JWT token validation & permission verification
-│       ├── engines/                 # Core SCM decision & optimization engines
-│       │   ├── inventory_engine.py          # Atomic stock balance mutations & validations
-│       │   ├── demand_sensing_engine.py     # Velocity sensing & surge classification
-│       │   ├── expiry_fefo_engine.py        # FEFO allocation & batch aging calculation
-│       │   ├── network_balancing_engine.py  # Inter-DC transfer discovery & matching
-│       │   ├── replenishment_engine.py      # ROQ calculation & 4-part explainable reasoning
-│       │   ├── alert_escalation_engine.py   # SLA countdown timers & escalation workflows
-│       │   ├── risk_engine.py               # Stockout & expiry risk score modeling
-│       │   └── scenario_simulation_engine.py# Parametric stress-testing simulator
-│       ├── ml/                      # Machine learning demand forecasting pipeline
-│       │   ├── data_preparation.py   # Database time-series extraction & cleaning
-│       │   ├── feature_engineering.py# Lags, rolling averages, & calendar features
-│       │   ├── train.py              # RandomForestRegressor training pipeline
-│       │   ├── predict.py            # Vectorized multi-step demand forecaster
-│       │   ├── evaluate.py           # Evaluation metrics (R², RMSE, MAE, WAPE)
-│       │   ├── model_registry.py     # Model metadata & version manager
-│       │   └── saved_models/         # Serialized model artifacts (.pkl)
-│       ├── models/                  # SQLAlchemy 2.0 ORM database models
-│       │   ├── product.py, warehouse.py, inventory.py, batch.py, transaction.py
-│       │   ├── demand.py, forecast.py, risk.py, replenishment.py, transfer.py
-│       │   ├── alert.py, escalation.py, notification.py, scenario.py, settings.py
-│       │   └── auth.py (User, Role, Permission, RolePermission, AuditLog)
-│       ├── routers/                 # FastAPI REST & WebSocket route handlers
-│       │   ├── auth.py, users.py, dashboard.py, inventory.py, transactions.py
-│       │   ├── demand.py, forecasts.py, replenishment.py, transfers.py
-│       │   ├── alerts.py, warehouses.py, scenarios.py, reports.py
-│       │   ├── settings.py, notifications.py, metrics.py, assistant.py, ws.py
-│       │   └── suppliers.py
-│       ├── schemas/                 # Pydantic request and response schemas
-│       ├── services/                # Business logic services (Auth, Gemini AI, Resend Email)
-│       ├── tests/                   # Pytest automated test suite (34 test cases)
-│       └── utils/                   # Data seeders, timezone helpers, and formatters
-│           ├── data_seeder.py       # Comprehensive database population utility
-│           └── timezone.py          # IST/UTC timezone management utilities
-├── medcare-frontend/                # React 19 Frontend application (Vite)
-│   ├── package.json                 # Frontend dependencies & scripts
-│   ├── vite.config.js               # Vite build configuration
-│   ├── tailwind.config.js           # TailwindCSS styling configuration
-│   ├── vercel.json                  # Vercel deployment rewrite rules
-│   ├── index.html                   # Single Page Application HTML entry
-│   └── src/
-│       ├── main.jsx                 # React root render
-│       ├── App.jsx                  # React Router & protected route definitions
-│       ├── index.css                # Tailwind global styles
-│       ├── api/
-│       │   ├── client.js            # Dynamic Fetch API client (dev & cloud URLs)
-│       │   └── websocket.js         # WebSocket client with auto WSS/WS detection
-│       ├── context/
-│       │   ├── AuthContext.jsx      # Authentication & user permission context
-│       │   └── ControlTowerContext.jsx # Global warehouse filter & refresh trigger
-│       ├── components/
-│       │   ├── layout/              # Sidebar, Topbar, and Page wrapper
-│       │   ├── assistant/           # ChatWidget AI Copilot floating drawer
-│       │   ├── auth/                # ProtectedRoute guard
-│       │   ├── inventory/           # AddProductModal, RecordSaleModal
-│       │   ├── warehouses/          # AddWarehouseModal, EditWarehouseModal
-│       │   ├── transactions/        # TransactionModal
-│       │   └── ui/                  # StatCard, Modal, Badge, LoadingState, ErrorState
-│       └── pages/                   # Application view components
-│           ├── Login.jsx            # Authentication page
-│           ├── Dashboard.jsx        # Executive Control Tower overview
-│           ├── Inventory.jsx        # Real-time stock ledger & FEFO aging
-│           ├── DemandForecast.jsx   # ML demand sensing & model lineage
-│           ├── Replenishment.jsx    # ROQ optimization & inter-DC transfers
-│           ├── Alerts.jsx           # SLA-governed alert escalation console
-│           ├── Warehouses.jsx       # Distribution facilities & network map
-│           ├── Reports.jsx          # Financial valuation & CSV reports
-│           ├── ScenarioSimulator.jsx# Parametric stress-testing simulator
-│           ├── UserManagement.jsx   # Admin user & RBAC management
-│           └── Settings.jsx         # SCM system parameters & thresholds
-└── docs/                            # Architectural specifications & guides
-    ├── architecture.md              # System design & pipeline architecture
-    ├── database.md                  # Entity relationships & schema documentation
-    ├── functional-requirements-specification.md # Detailed functional specification
-    └── replenishment-engine.md      # Replenishment math & optimization formulas
-```�─ Alerts.jsx           # SLA-governed alert escalation console
-│           ├── Warehouses.jsx       # Distribution facilities & network map
-│           ├── Reports.jsx          # Financial valuation & CSV reports
-│           ├── ScenarioSimulator.jsx# Parametric stress-testing simulator
-│           ├── UserManagement.jsx   # Admin user & RBAC management
-│           └── Settings.jsx         # SCM system parameters & thresholds
-└── docs/                            # Architectural specifications & guides
-    ├── architecture.md              # System design & pipeline architecture
-    ├── database.md                  # Entity relationships & schema documentation
-    ├── functional-requirements-specification.md # Detailed functional specification
-    └── replenishment-engine.md      # Replenishment math & optimization formulas
-```
+**Interactive API Docs**: `http://localhost:8000/docs` (Swagger UI) / `http://localhost:8000/redoc`
 
 ---
 
-## ⚙️ Prerequisites
+## ?? ML Pipeline
 
-Ensure the following runtimes and tools are installed on your host system:
+Located in `backend/app/ml/`:
 
-* **Python**: `3.10`, `3.11`, `3.12`, or `3.13`
-* **Node.js**: `18.x`, `20.x`, or `22.x` (with `npm` package manager)
-* **PostgreSQL**: `14.x`, `15.x`, or `16.x` (or **pgAdmin 4** installed locally)
-* **Git**: Command-line version control client
+| File | Purpose |
+|---|---|
+| `data_preparation.py` | Dataset extraction from the database |
+| `feature_engineering.py` | Feature construction (lag features, seasonal indicators, rolling stats) |
+| `train.py` | RandomForestRegressor model training |
+| `evaluate.py` | Model performance evaluation (RMSE, MAE, R�) |
+| `predict.py` | Inference pipeline with confidence interval generation |
+| `model_registry.py` | Model artifact registry and versioning |
+| `saved_models/` | Persisted `.pkl` model artifacts |
 
----
+**Confidence Level**: 87% (`ML_CONFIDENCE_LEVEL=0.87`)
 
-## 🔧 Installation & Setup
-
-### 1. Clone the Repository
+**Train via API**:
 ```bash
-git clone https://github.com/your-org/medcare-pharma-control-tower.git
-cd medcare-pharma-control-tower
+POST /api/forecasts/train
 ```
 
-### 2. Configure Environment Variables
-Copy the provided `.env.example` file to create your active `.env` file in the root directory:
+---
+
+## ?? Getting Started
+
+### Prerequisites
+
+- **Python 3.11+**
+- **Node.js 18+** & **npm**
+- **PostgreSQL 15+** (local or Neon cloud)
+
+### 1. Clone & Configure Environment
 
 ```bash
-# On Linux / macOS / PowerShell
+git clone <repository-url>
+cd medcare-pharma-control-tower-main
+
+# Copy and configure the environment file
 cp .env.example .env
+# Edit .env with your PostgreSQL credentials
 ```
 
-Edit `.env` to supply your local PostgreSQL database credentials:
-
-```env
-# PostgreSQL Connection Parameters
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=medcare_scm
-DB_USER=postgres
-DB_PASSWORD=your_postgres_password
-DB_SCHEMA=public
-
-# API & Server Configuration
-HOST=0.0.0.0
-PORT=8000
-SECRET_KEY=medcare-scm-control-tower-secret-key-2026
-
-# Machine Learning Subsystem
-MODEL_PATH=backend/app/ml/saved_models/demand_forecast_model.pkl
-ML_RETRAIN_ON_STARTUP=false
-ML_CONFIDENCE_LEVEL=0.87
-```
-
-*(Note: If no PostgreSQL credentials are provided or the database server is temporarily offline, the backend gracefully falls back to local high-speed SQLite for zero-crash startup).*
-
----
-
-## 🗄 Database Setup & Seeding
-
-### Option A: Via pgAdmin 4 (Recommended Graphical Setup)
-1. Open **pgAdmin 4** and connect to your PostgreSQL server.
-2. Right-click on **Databases** ➔ **Create** ➔ **Database...**
-3. Enter `medcare_scm` as the Database Name and click **Save**.
-4. Select `medcare_scm`, open the **Query Tool** (Tools ➔ Query Tool).
-5. Open and execute `backend/database/schema.sql` (Creates all 28 tables, indexes, check constraints, and foreign keys).
-6. Open and execute `backend/database/seed.sql` to populate initial business data.
-
-### Option B: Via PostgreSQL Command Line (`psql`)
-```bash
-# Create database
-createdb -U postgres -h localhost medcare_scm
-
-# Execute DDL schema
-psql -U postgres -h localhost -d medcare_scm -f backend/database/schema.sql
-
-# Populate initial seed dataset
-psql -U postgres -h localhost -d medcare_scm -f backend/database/seed.sql
-```
-
----
-
-## 🚀 Running the Application
-
-### 1. Backend Setup & Startup (FastAPI)
+### 2. Backend Setup
 
 ```bash
-# Navigate to project root
-cd medcare-pharma-control-tower
+# Install Python dependencies
+pip install -r requirements.txt
 
-# (Optional) Create and activate a Python virtual environment
-python -m venv venv
-# On Windows PowerShell:
-.\venv\Scripts\Activate.ps1
-# On Linux / macOS:
-source venv/bin/activate
-
-# Install backend dependencies
-pip install -r backend/requirements.txt
-
-# Start the FastAPI asynchronous backend with live reloading
+# Start the FastAPI backend (from project root)
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-* **Swagger API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
-* **ReDoc Interactive Reference**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-* **Microservice Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+The backend will:
+1. Connect to PostgreSQL and create all tables via SQLAlchemy
+2. Seed initial data automatically via `data_seeder.py`
+3. Start the periodic email alert scheduler
 
-### 2. Frontend Setup & Startup (React + Vite)
+**Backend API**: `http://localhost:8000`
+**Swagger Docs**: `http://localhost:8000/docs`
+**Health Check**: `http://localhost:8000/api/health`
 
-In a separate terminal:
+### 3. Frontend Setup
 
 ```bash
 # Navigate to the frontend directory
@@ -749,81 +329,152 @@ npm install
 npm run dev
 ```
 
-* **Live Control Tower Application**: [http://localhost:5173](http://localhost:5173)
+**Frontend Application**: `http://localhost:5173`
+
+### 4. Default Admin Credentials
+
+```
+Username: admin  (or the seeded admin email)
+Password: Admin@12345
+```
 
 ---
 
-## 🔐 Environment Variables Reference
+## ?? Environment Variables Reference
 
-| Variable Name | Required | Default Value | Description |
+| Variable | Required | Default | Description |
 |---|---|---|---|
 | `DB_HOST` | Yes | `localhost` | PostgreSQL host address |
 | `DB_PORT` | Yes | `5432` | PostgreSQL port |
 | `DB_NAME` | Yes | `medcare_scm` | Target database name |
 | `DB_USER` | Yes | `postgres` | Database username |
-| `DB_PASSWORD` | Yes | *None (Configured by user)* | Database password |
-| `DB_SCHEMA` | No | `public` | Target PostgreSQL schema |
-| `DATABASE_URL` | No | *Derived from DB_* | Full connection string override (`postgresql+asyncpg://...`) |
-| `HOST` | No | `0.0.0.0` | FastAPI server listening bind host |
-| `PORT` | No | `8000` | FastAPI server listening port |
-| `SECRET_KEY` | Yes | *Configured in .env* | Secret key for cryptographic signing |
-| `JWT_SECRET_KEY`| No | *Configured in .env* | Secret key used for signing JWT bearer tokens |
+| `DB_PASSWORD` | Yes | � | Database password |
+| `DB_SCHEMA` | No | `public` | PostgreSQL schema |
+| `DATABASE_URL` | No | *(derived from DB_*)* | Full connection string override (`postgresql+asyncpg://...`) |
+| `HOST` | No | `0.0.0.0` | FastAPI bind host |
+| `PORT` | No | `8000` | FastAPI port |
+| `SECRET_KEY` | Yes | � | Secret key for cryptographic signing |
+| `JWT_SECRET_KEY` | No | *(configured in .env)* | JWT bearer token signing key |
 | `JWT_ALGORITHM` | No | `HS256` | JWT signing algorithm |
-| `MODEL_PATH` | No | `backend/app/ml/saved_models/...` | Path to persisted ML regression model file |
+| `MODEL_PATH` | No | `backend/app/ml/saved_models/demand_forecast_model.pkl` | ML model artifact path |
 | `ML_RETRAIN_ON_STARTUP` | No | `false` | Retrain ML model on backend startup |
-| `ML_CONFIDENCE_LEVEL` | No | `0.87` | Confidence interval level for demand bounds (87%) |
+| `ML_CONFIDENCE_LEVEL` | No | `0.87` | Forecast confidence interval level |
+| `GEMINI_API_KEY` | No | � | Google Gemini API key (for AI Copilot) |
+| `RESEND_API_KEY` | No | � | Resend API key for email alerts |
+| `SMTP_HOST` | No | � | SMTP server host (alternative to Resend) |
+| `SMTP_PORT` | No | `587` | SMTP port |
+| `SMTP_USER` | No | � | SMTP username |
+| `SMTP_PASSWORD` | No | � | SMTP password |
+| `EMAIL_FROM` | No | � | Sender email address for alerts |
+| `APP_FRONTEND_URL` | No | `http://localhost:5173` | Frontend URL (used in email links) |
+| `CORS_ORIGINS` | No | `*` | Comma-separated allowed CORS origins |
 
 ---
 
-## 🧪 Automated Testing
+## ?? Automated Testing
 
-The project includes an automated test suite implemented with `pytest` and `pytest-asyncio`. The test suite exercises:
-* **E1 Inventory Evaluations**: Status transitions, stock threshold calculations, and inventory transaction validations.
-* **P1 Demand Sensing & Surge Detection**: Forecast generation, seasonal event factor multiplication, and surge classification.
-* **FEFO Expiry & Batch Tracking**: Chronological batch allocation order, expired batch filtering, and aging risk calculations.
-* **Network Balancing**: Surplus matching, transfer opportunity identification, and savings calculation.
-* **Replenishment Optimizer**: Recommended Order Quantity (ROQ) computation, review frequencies, and order constraints.
-* **What-If Scenario Engine**: Parametric stress-testing simulations and metric variance calculations.
-* **Machine Learning Pipeline**: Dataset extraction, feature engineering, model training, and persistence.
+The project includes a comprehensive `pytest` test suite in `backend/app/tests/` and `backend/database/`.
 
-### Run Automated Tests
+### Test Modules
+
+| Test File | Coverage |
+|---|---|
+| `test_e1_inventory.py` | Inventory status transitions, threshold calculations, transaction validations |
+| `test_e1_alerts.py` | Alert lifecycle, SLA escalation triggers |
+| `test_e1_transactions.py` | Transaction ledger integrity |
+| `test_p1_demand_sensing.py` | Forecast generation, seasonal factor multiplication, surge classification |
+| `test_p1_expiry_fefo.py` | FEFO chronological allocation, expired batch filtering, aging risk |
+| `test_p1_network_balancing.py` | Surplus matching, transfer opportunity identification |
+| `test_p1_replenishment.py` | ROQ computation, review frequencies, order constraints |
+| `test_p1_scenarios.py` | Parametric stress-testing simulations, metric variance calculations |
+| `test_ml_pipeline.py` | Dataset extraction, feature engineering, model training & persistence |
+| `test_business_engines_audit.py` | Comprehensive engine audit across all business logic |
+| `test_assistant_gemini.py` | Gemini AI Copilot integration tests |
+| `test_email_alert_service.py` | Email alert scheduler and dispatch tests |
+| `test_e2e_integration_e1.py` | End-to-end E1 inventory integration tests |
+| `test_e2e_integration_p1.py` | End-to-end P1 demand/replenishment integration tests |
+| `test_replenishment_planning_sections.py` | Replenishment planner section tests |
+| `test_database_strict_postgres.py` | PostgreSQL connectivity and schema validation |
+
+### Run Tests
+
 ```bash
-# Run pytest across the backend test suite
+# Run the full pytest test suite
 python -m pytest backend/app/tests/ -v
+
+# Run a specific test module
+python -m pytest backend/app/tests/test_e1_inventory.py -v
+
+# Run database-level tests
+python -m pytest backend/database/ -v
 ```
 
 ---
 
-## 📷 Screenshots
+## ?? Deployment
 
-| Module View | Description |
+Deployment configurations are located in `deployment/`.
+
+### Docker (Recommended)
+
+```bash
+# Development � full stack with separate backend & frontend containers
+docker-compose -f deployment/docker/docker-compose.yml up --build
+
+# Production � optimised multi-stage build
+docker-compose -f deployment/docker/docker-compose.prod.yml up --build
+```
+
+**Available Dockerfiles:**
+
+| File | Purpose |
 |---|---|
-| ![Dashboard Overview](docs/screenshots/dashboard.png) | *Executive Control Tower Dashboard — High-level KPI stat cards, demand vs. inventory trajectory curves, facility health grid, and 1-click executive recommendation execution.* |
-| ![Inventory & FEFO Ledger](docs/screenshots/inventory.png) | *Real-Time Inventory & FEFO Ledger — SKU inventory breakdown across distribution centers, batch aging summary, and historical audit ledger.* |
-| ![Demand Sensing](docs/screenshots/demand_forecasting.png) | *Sensed Demand Forecasting — Multi-factor signal overlays (+60% flu season spike), ML model transparency, and ordering velocity heatmaps.* |
-| ![Replenishment & Transfers](docs/screenshots/replenishment.png) | *Replenishment & Network Balancing Optimizer — 4-part explainable ROQ recommendations and transfer-first inter-DC stock balancing.* |
-| ![Alert Escalation Engine](docs/screenshots/alerts.png) | *Alert & SLA Escalation Console — SLA countdown timers (Critical 4h / High 24h / Medium 72h), root cause breakdown, and multi-channel dispatch logs.* |
-| ![What-If Scenario Simulator](docs/screenshots/scenario_simulator.png) | *What-If Scenario Simulator — Parametric stress-testing sliders, side-by-side metric comparison, and 16-week projected stockout trajectory.* |
+| `Dockerfile.backend` | Backend-only container |
+| `Dockerfile.frontend` | Frontend-only Nginx-served container |
+| `Dockerfile.fullstack` | Unified single-container deployment |
 
-*(Note: If viewing in an environment where screenshots are not yet rendered, placeholders above illustrate expected visual layout).*
+### Cloud Platforms
+
+Deployment configs are available for:
+
+- **Render** � `deployment/cloud-platforms/render/`
+- **Railway** � `deployment/cloud-platforms/railway/`
+- **Vercel** � `deployment/cloud-platforms/vercel/` (frontend) + `medcare-frontend/vercel.json`
+- **Netlify** � `deployment/cloud-platforms/netlify/`
+
+See `deployment/FREE_HOSTING_STEP_BY_STEP.md` for a step-by-step free-tier hosting guide.
+
+### Unified Static Frontend Serving
+
+When the `medcare-frontend/dist/` build output is present, the FastAPI backend automatically serves the React SPA at the root path, enabling single-container deployment without a separate frontend server.
+
+```bash
+# Build frontend for static serving
+cd medcare-frontend && npm run build
+# Then run backend � it will serve the built frontend automatically
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+```
 
 ---
 
-## 🔍 Troubleshooting
+## ?? Troubleshooting
 
 ### 1. PostgreSQL Authentication Failure (`asyncpg.exceptions.InvalidPasswordError`)
-* **Cause**: The `DB_PASSWORD` or `DB_USER` in your `.env` file does not match your local PostgreSQL server credentials.
-* **Solution**: Update the `.env` file with the correct password. Verify you can connect via pgAdmin 4 or `psql -U postgres -h localhost`. The backend will automatically log a notice and utilize fallback SQLite until credentials are confirmed.
+- **Cause**: Incorrect `DB_PASSWORD` or `DB_USER` in `.env`.
+- **Fix**: Update `.env` with correct credentials. Verify connectivity via `psql -U postgres -h localhost`.
 
 ### 2. Port Conflict (Port 8000 or 5173 already in use)
-* **Cause**: Another service or previous process instance is listening on port 8000 (FastAPI) or port 5173 (Vite).
-* **Solution**:
-  * To change the backend port: `uvicorn backend.app.main:app --port 8080 --reload`
-  * To change the frontend port: `npm run dev -- --port 3000`
+- **Fix**:
+  ```bash
+  # Change backend port
+  uvicorn backend.app.main:app --port 8080 --reload
 
-### 3. Missing Frontend Dependencies / Node Module Resolution
-* **Cause**: Incomplete `npm install` or stale cache.
-* **Solution**:
+  # Change frontend port
+  npm run dev -- --port 3000
+  ```
+
+### 3. Missing Frontend Dependencies
+- **Fix**:
   ```bash
   cd medcare-frontend
   rm -rf node_modules package-lock.json
@@ -832,42 +483,62 @@ python -m pytest backend/app/tests/ -v
   ```
 
 ### 4. ML Model Artifact Missing on First Run
-* **Cause**: `demand_forecast_model.pkl` has not yet been generated.
-* **Solution**: The backend automatically trains and serializes the baseline model artifact upon first prediction call or via `POST /api/forecasts/train`. Ensure write permissions exist for `backend/app/ml/saved_models/`.
+- **Cause**: `demand_forecast_model.pkl` not yet generated.
+- **Fix**: The backend trains and serialises the model automatically on the first prediction call, or trigger manually via `POST /api/forecasts/train`. Ensure write permissions exist for `backend/app/ml/saved_models/`.
+
+### 5. GEMINI_API_KEY Not Set (AI Copilot unavailable)
+- **Cause**: `GEMINI_API_KEY` not configured in `.env`.
+- **Fix**: Set `GEMINI_API_KEY=<your-key>` in `.env`. The AI Copilot (`/api/assistant`) will be unavailable without a valid key.
 
 ---
 
-## 📈 Project Status
+## ?? Project Status
 
-| Module / Subsystem | Implementation Status | Verification Method |
-|---|---|---|
-| **PostgreSQL Database Schema & DDL** | ✅ Fully Implemented | 28 tables, relational constraints, foreign keys, and indexes |
-| **FastAPI Asynchronous Backend** | ✅ Fully Implemented | 18 router modules, OpenAPI Swagger documentation |
-| **Executive Control Tower Dashboard** | ✅ Fully Implemented | Live KPIs, Recharts trajectory, 1-click execution |
-| **Inventory & FEFO Batch Ledger** | ✅ Fully Implemented | SKU tracking, batch aging, atomic transaction processing |
-| **Demand Sensing & Surge Detection** | ✅ Fully Implemented | `RandomForestRegressor`, signal overlays, model transparency |
-| **Replenishment & ROQ Engine** | ✅ Fully Implemented | 4-part explainable justifications, purchase orders |
-| **Inter-DC Stock Balancing** | ✅ Fully Implemented | Transfer-first network policy, atomic dual-DC stock synchronization |
-| **Alert & SLA Escalation Engine** | ✅ Fully Implemented | 4h / 24h / 72h SLA cadences, multi-channel dispatch logs |
-| **Distribution Center Management** | ✅ Fully Implemented | DC commissioning, capacity utilization tracking |
-| **What-If Scenario Simulator** | ✅ Fully Implemented | Parametric stress testing, 16-week outcome modeling |
-| **Financial Valuation & CSV Reports**| ✅ Fully Implemented | Multi-dimensional query filters, 1-click CSV download |
-| **Role-Based Access Control (RBAC)** | ✅ Fully Implemented | JWT auth, role permissions matrix, audit logs |
-| **Grounded AI Copilot** | ✅ Fully Implemented | Database-grounded natural language query engine |
-| **WebSocket Real-Time Broadcast** | ✅ Fully Implemented | Duplex push notification pipeline |
-
----
-
-## 🔮 Future Enhancements
-
-The following roadmap items represent potential operational extensions:
-* **Direct ERP / SAP S/4HANA Connector**: Bi-directional automated synchronization with enterprise SAP MM and SD modules.
-* **IoT Cold-Chain Telemetry Integration**: Real-time MQTT stream ingestion from refrigerated truck temperature sensors to trigger automated spoilage alerts.
-* **Automated Supplier EDI Protocol**: Integration with EDI 850 (Purchase Order) and EDI 856 (Ship Notice) standards for automated supplier dispatch.
-* **Mobile Field App for DC Warehouse Operations**: Barcode / QR-code handheld scanning for physical pallet intake, picking, and FEFO bin verification.
+| Module / Subsystem | Status |
+|---|---|
+| **PostgreSQL Database Schema & DDL** | ? Implemented |
+| **FastAPI Async Backend (19 routers)** | ? Implemented |
+| **Executive Control Tower Dashboard** | ? Implemented |
+| **Inventory & FEFO Batch Ledger** | ? Implemented |
+| **Demand Sensing & Surge Detection** | ? Implemented |
+| **Replenishment & ROQ Engine** | ? Implemented |
+| **Inter-DC Network Balancing** | ? Implemented |
+| **Alert & SLA Escalation Engine** | ? Implemented |
+| **Distribution Centre Management** | ? Implemented |
+| **What-If Scenario Simulator** | ? Implemented |
+| **Financial Valuation & CSV Reports** | ? Implemented |
+| **Role-Based Access Control (RBAC)** | ? Implemented |
+| **Grounded AI Copilot (Gemini)** | ? Implemented |
+| **WebSocket Real-Time Push** | ? Implemented |
+| **Email Alert Scheduler (Resend/SMTP)** | ? Implemented |
+| **ML Pipeline (RandomForestRegressor)** | ? Implemented |
+| **Docker & Cloud Deployment Configs** | ? Implemented |
+| **pytest Automated Test Suite** | ? Implemented |
 
 ---
 
-## 📄 License
+## ?? Documentation
 
-This project is released under the **MIT License**. See the [LICENSE](LICENSE) file for full details.
+Additional documentation is available in the `docs/` directory:
+
+| File | Description |
+|---|---|
+| `architecture.md` | System architecture overview |
+| `api.md` | API endpoint reference |
+| `database.md` | Database schema documentation |
+| `alert-engine.md` | Alert & escalation engine details |
+| `demand-forecasting.md` | Demand sensing & ML details |
+| `replenishment-engine.md` | Replenishment engine details |
+| `expiry-allocation.md` | FEFO expiry allocation details |
+| `scenario-engine.md` | Scenario simulation engine details |
+| `testing.md` | Testing strategy & approach |
+| `deployment.md` | Deployment guide |
+| `demo-script.md` | Demo walkthrough script |
+| `functional-requirements-specification.md` | Full FRS document |
+| `requirements-traceability.md` | Requirements traceability matrix |
+
+---
+
+## ?? License
+
+This project is released under the **MIT License**.
