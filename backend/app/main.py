@@ -99,7 +99,9 @@ app.include_router(ws.router)
 app.include_router(suppliers.router)
 
 
+
 @app.get("/health", tags=["Health"])
+@app.head("/api/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health_check():
     """Health check endpoint testing live PostgreSQL connection."""
