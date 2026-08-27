@@ -10,6 +10,7 @@ from backend.app.models.signal import DemandSignal
 from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
 from backend.app.ml.model_registry import ModelRegistry
+from backend.app.utils.timezone import get_today_ist
 
 router = APIRouter(prefix="/api/demand", tags=["Demand"])
 
@@ -104,7 +105,7 @@ async def get_demand_heatmap(
     wh_res = await db.execute(select(Warehouse.id))
     warehouses = [w[0] for w in wh_res.all()]
 
-    today = date(2026, 8, 24)
+    today = get_today_ist()
     weeks = [
         f"W1 ({today.strftime('%d %b')})",
         f"W2 ({(today + timedelta(days=7)).strftime('%d %b')})",

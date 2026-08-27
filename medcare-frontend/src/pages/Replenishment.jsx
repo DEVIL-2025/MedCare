@@ -676,7 +676,7 @@ export default function Replenishment() {
                       <td className="py-2.5 px-3 font-mono text-[11px] text-ink-600">{po.sku} @ {po.warehouse}</td>
                       <td className="py-2.5 px-3 font-bold text-ink-800">{po.quantity?.toLocaleString()}</td>
                       <td className="py-2.5 px-3 font-semibold text-ink-900">{po.value}</td>
-                      <td className="py-2.5 px-3 text-ink-500">{po.date}</td>
+                      <td className="py-2.5 px-3 text-ink-500">{formatDate(po.date || po.order_date || po.orderDate || po.created_at) || po.date || 'Recent'}</td>
                       <td className="py-2.5 px-3 text-right">
                         <Badge tone={poStatusTone[po.status] || 'neutral'}>{po.status}</Badge>
                       </td>

@@ -54,6 +54,8 @@ class Settings(BaseSettings):
                 url = url.replace("postgres://", "postgresql+asyncpg://", 1)
             elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
                 url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            if "sslmode=" in url:
+                url = url.replace("sslmode=", "ssl=")
             return url
         if self.DB_HOST and self.DB_USER and self.DB_NAME:
             pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""

@@ -14,7 +14,7 @@ from backend.app.models.batch import Batch
 from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
 from backend.app.ml.predict import PredictionService
-from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime, format_ist_date
+from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime, format_ist_date, get_utc_now, to_ist_iso
 from backend.app.routers.ws import ws_manager
 
 router = APIRouter(prefix="/api/replenishment", tags=["Replenishment"])
@@ -214,7 +214,7 @@ async def get_replenishment_overview(
         })
 
     # 5. Purchase Orders from DB
-    po_query = select(PurchaseOrder).order_by(PurchaseOrder.order_date.desc())
+    po_query = select(PurchaseOrder).order_by(PurchaseOrder.order_date.desc(), PurchaseOrder.created_at.desc())
     if warehouse and warehouse != "All":
         po_query = po_query.where(PurchaseOrder.warehouse_id == warehouse)
     po_res = await db.execute(po_query)
@@ -228,7 +228,10 @@ async def get_replenishment_overview(
             "warehouse": po.warehouse_id,
             "quantity": po.quantity,
             "value": f"₹{round(po.total_cost_inr / 100000.0, 1)} L",
-            "date": format_ist_date(po.order_date),
+            "date": format_ist_date(po.order_date or po.created_at),
+            "order_date": format_ist_date(po.order_date or po.created_at),
+            "created_at": to_ist_iso(po.created_at) if hasattr(po, 'created_at') and po.created_at else None,
+            "eta_date": format_ist_date(po.eta_date) if po.eta_date else None,
             "status": po.status.capitalize()
         }
         for po in all_pos
@@ -323,8 +326,8 @@ async def get_replenishment_overview(
             "warehouse": po.warehouse_id,
             "qty": po.quantity,
             "value": f"₹{round(po.total_cost_inr / 100000.0, 1)} L",
-            "approvedOn": po.order_date.strftime("%d %b %Y"),
-            "eta": po.eta_date.strftime("%d %b %Y") if po.eta_date else "27 Aug 2026",
+            "approvedOn": format_ist_date(po.order_date or po.created_at),
+            "eta": format_ist_date(po.eta_date) if po.eta_date else format_ist_date((po.order_date or today) + timedelta(days=5)),
             "status": po.status.capitalize()
         }
         for po in all_pos if po.status in ["APPROVED", "Approved", "SENT", "Sent", "Received", "COMPLETED", "Completed"]
@@ -509,7 +512,8 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail=f"Replenishment recommendation '{rec_id}' not found.")
 
     rec.status = "APPROVED"
-    today = date(2026, 8, 24)
+    today = get_today_ist()
+    now_utc = get_utc_now()
 
     po_id = None
     # If decision type is TRANSFER, update transfer records
@@ -537,7 +541,7 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
             order_date=today,
             eta_date=today + timedelta(days=5),
             status="APPROVED",
-            created_at=datetime.now(timezone.utc).replace(tzinfo=None)
+            created_at=now_utc
         )
         db.add(po)
 
