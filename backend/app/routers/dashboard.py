@@ -66,8 +66,9 @@ async def get_dashboard_data(
     total_val_inr = sum(item[0].current_stock * item[1].unit_cost for item in inv_items)
     total_val_display = f"₹{total_val_inr / 10000000.0:.2f} Cr" if total_val_inr >= 10000000 else f"₹{total_val_inr / 100000.0:.2f} Lakhs"
 
-    # 2. Critical & High Stockout SKUs
+    # 2. Critical & Low Stock SKUs
     critical_skus = len([i for i in inv_items if i[0].risk_level == "critical" or i[0].status in ["CRITICAL", "OUT_OF_STOCK"]])
+    low_stock_skus = len([i for i in inv_items if i[0].status == "LOW_STOCK" or (i[0].risk_level == "high" and i[0].status not in ["CRITICAL", "OUT_OF_STOCK"])])
     stockout_risk_high = len([i for i in inv_items if i[0].risk_level in ["critical", "high"]])
 
     # 3. Replenishment Needed Value from DB
@@ -327,6 +328,7 @@ async def get_dashboard_data(
             "total_inventory_value_raw": total_val_inr,
             "total_inventory_units": f"{total_units:,}",
             "critical_skus": critical_skus,
+            "low_stock_skus": low_stock_skus,
             "replenishment_needed": f"{len(recs)} SKUs ({replenish_val_display})",
             "stockout_risk_high": stockout_risk_high,
             "inventory_health": f"{health_pct}%",

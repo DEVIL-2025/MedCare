@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Package, Truck, Users, FileClock, Server, Check, Save, Plus, Trash2,
+  Package, Truck, Check, Save, Plus, Trash2,
   AlertCircle, Mail, Key, Send, RefreshCw, Radio
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
@@ -13,11 +13,8 @@ import { formatDateTime } from '../utils/dateUtils';
 
 const navItems = [
   { label: 'Inventory', icon: Package, desc: 'Inventory rules, FEFO threshold and buffers' },
-  { label: 'Notifications & Email', icon: Mail, desc: 'Low-stock email alerts, Resend API key, and recipients' },
+  { label: 'Notifications & Email', icon: Mail, desc: 'Low-stock email alerts, Resend API key, and frequency' },
   { label: 'Suppliers', icon: Truck, desc: 'Add and manage pharmaceutical suppliers' },
-  { label: 'Users & Roles', icon: Users, desc: 'Manage access and active stakeholders' },
-  { label: 'Audit Logs', icon: FileClock, desc: 'Live system execution records' },
-  { label: 'System', icon: Server, desc: 'Architecture and runtime status' },
 ];
 
 export default function Settings() {
@@ -42,6 +39,7 @@ export default function Settings() {
   const [emailFrom, setEmailFrom] = useState('');
   const [alertRecipientEmail, setAlertRecipientEmail] = useState('');
   const [lowStockAlertsEnabled, setLowStockAlertsEnabled] = useState('Enabled');
+  const [alertIntervalHours, setAlertIntervalHours] = useState('2');
   const [smtpHost, setSmtpHost] = useState('');
   const [smtpPort, setSmtpPort] = useState('587');
   const [smtpUser, setSmtpUser] = useState('');
@@ -82,6 +80,7 @@ export default function Settings() {
           if (res.parameters.email_from) setEmailFrom(res.parameters.email_from);
           if (res.parameters.alert_recipient_email) setAlertRecipientEmail(res.parameters.alert_recipient_email);
           if (res.parameters.low_stock_alerts_enabled) setLowStockAlertsEnabled(res.parameters.low_stock_alerts_enabled);
+          if (res.parameters.alert_interval_hours) setAlertIntervalHours(res.parameters.alert_interval_hours);
           if (res.parameters.smtp_host) setSmtpHost(res.parameters.smtp_host);
           if (res.parameters.smtp_port) setSmtpPort(res.parameters.smtp_port);
           if (res.parameters.smtp_user) setSmtpUser(res.parameters.smtp_user);
@@ -142,6 +141,7 @@ export default function Settings() {
         email_from: emailFrom.trim(),
         alert_recipient_email: alertRecipientEmail.trim(),
         low_stock_alerts_enabled: lowStockAlertsEnabled,
+        alert_interval_hours: alertIntervalHours,
         smtp_host: smtpHost.trim(),
         smtp_port: smtpPort.trim(),
         smtp_user: smtpUser.trim(),
@@ -238,15 +238,12 @@ export default function Settings() {
     return <ErrorState message={error} onRetry={loadSettings} />;
   }
 
-  const users = data?.users || [];
-  const audit_logs = data?.audit_logs || [];
-
   return (
     <div className="space-y-5">
       {/* Top Header */}
       <div className="bg-white p-3.5 rounded-lg border border-ink-100 shadow-card">
         <h2 className="text-[16px] font-bold text-ink-900">Control Tower System & Algorithmic Settings</h2>
-        <p className="text-[12px] text-ink-500">Fine-tune safety stock multipliers, configure low-stock email alerts, manage suppliers, and monitor system audit trails.</p>
+        <p className="text-[12px] text-ink-500">Fine-tune safety stock multipliers, configure low-stock email alerts & time intervals, and manage pharmaceutical suppliers in Database.</p>
       </div>
 
       {saveSuccess && (
@@ -257,9 +254,9 @@ export default function Settings() {
       )}
 
       {/* Main Settings Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-5 items-start">
         {/* Navigation Sidebar */}
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-2 space-y-1">
+        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-2 space-y-1 h-fit">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.label;
@@ -373,7 +370,7 @@ export default function Settings() {
                     <p className="text-[11.5px] text-ink-500">Configure email API credentials and automated consolidated low-stock digest triggers.</p>
                   </div>
                   <span className="text-[11px] font-mono bg-forest-100 text-forest-800 px-2.5 py-0.5 rounded font-bold">
-                    24h Cooldown Active
+                    ⚡ Interval: Every {alertIntervalHours}h Active
                   </span>
                 </div>
 
@@ -496,16 +493,36 @@ export default function Settings() {
                     </span>
                   </div>
 
-                  <div className="sm:col-span-2">
+                  <div>
                     <label className="block text-ink-700 font-semibold mb-1">Automated Low-Stock Trigger</label>
                     <select
                       value={lowStockAlertsEnabled}
                       onChange={(e) => setLowStockAlertsEnabled(e.target.value)}
                       className="w-full px-3 py-1.5 rounded border border-ink-200 bg-white text-ink-800 focus:outline-none focus:border-forest-600 font-medium"
                     >
-                      <option value="Enabled">Enabled (Automatically send consolidated digest on outbound transactions & daily check)</option>
-                      <option value="Disabled">Disabled (Suppress outbound digest emails)</option>
+                      <option value="Enabled">Enabled (Send periodic email digest & transaction alerts)</option>
+                      <option value="Disabled">Disabled (Suppress all outbound digest emails)</option>
                     </select>
+                    <span className="text-[11px] text-ink-400">Master toggle for outbound low-stock email notifications.</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-ink-700 font-semibold mb-1">Periodic Alert Frequency / Interval</label>
+                    <select
+                      value={alertIntervalHours}
+                      onChange={(e) => setAlertIntervalHours(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded border border-ink-200 bg-white text-ink-800 focus:outline-none focus:border-forest-600 font-medium"
+                    >
+                      <option value="1">Every 1 Hour (High Urgency / Critical Tracking)</option>
+                      <option value="2">Every 2 Hours (Standard Monitoring)</option>
+                      <option value="3">Every 3 Hours</option>
+                      <option value="6">Every 6 Hours</option>
+                      <option value="12">Every 12 Hours</option>
+                      <option value="24">Every 24 Hours (Daily Digest)</option>
+                    </select>
+                    <span className="text-[11px] text-ink-400">
+                      An updated low-stock consolidated digest email will be automatically sent every {alertIntervalHours} hour{alertIntervalHours > 1 ? 's' : ''} as long as stock deficits exist in the database.
+                    </span>
                   </div>
                 </div>
 
@@ -798,93 +815,6 @@ export default function Settings() {
                     </table>
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* Tab 4: Users & Roles */}
-          {active === 'Users & Roles' && (
-            <div className="space-y-4">
-              <h3 className="text-[15px] font-bold text-ink-900 pb-2 border-b border-ink-100">
-                Active Stakeholders & Role Permissions
-              </h3>
-              <table className="w-full text-left text-[12.5px]">
-                <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
-                  <tr>
-                    <th className="py-2.5 px-3">Name</th>
-                    <th className="py-2.5 px-3">Email</th>
-                    <th className="py-2.5 px-3">Role</th>
-                    <th className="py-2.5 px-3 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {users.map((u, i) => (
-                    <tr key={i} className="hover:bg-cream-100/60">
-                      <td className="py-2.5 px-3 font-semibold text-ink-900">{u.name}</td>
-                      <td className="py-2.5 px-3 text-ink-500 font-mono">{u.email}</td>
-                      <td className="py-2.5 px-3 text-ink-800 font-medium">{u.role}</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <Badge tone={u.status === 'Active' ? 'good' : 'neutral'}>{u.status}</Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Tab 5: Audit Logs */}
-          {active === 'Audit Logs' && (
-            <div className="space-y-4">
-              <h3 className="text-[15px] font-bold text-ink-900 pb-2 border-b border-ink-100">
-                Live System Audit Trail
-              </h3>
-              <table className="w-full text-left text-[12px]">
-                <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
-                  <tr>
-                    <th className="py-2.5 px-3">Action Event</th>
-                    <th className="py-2.5 px-3">User / System</th>
-                    <th className="py-2.5 px-3 text-right">Timestamp (IST)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {audit_logs.map((log, i) => (
-                    <tr key={i} className="hover:bg-cream-100/60">
-                      <td className="py-2.5 px-3 text-ink-900 font-medium">{log.action}</td>
-                      <td className="py-2.5 px-3 text-forest-800">{log.user}</td>
-                      <td className="py-2.5 px-3 text-right font-mono text-ink-500 text-[11.5px]">
-                        {formatDateTime(log.iso || log.time, { includeSeconds: true })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Tab 6: System Architecture */}
-          {active === 'System' && (
-            <div className="space-y-3 text-[12.5px]">
-              <h3 className="text-[15px] font-bold text-ink-900 pb-2 border-b border-ink-100">
-                System Runtime Architecture
-              </h3>
-              <div className="p-3 bg-cream-100 rounded border border-ink-100 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-ink-500">Database Engine:</span>
-                  <span className="font-mono font-semibold text-ink-900">PostgreSQL (Neon Lakebase) via Async SQLAlchemy + asyncpg</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink-500">Backend Framework:</span>
-                  <span className="font-mono font-semibold text-ink-900">FastAPI + Uvicorn (Asynchronous REST + WebSockets)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink-500">ML Engine:</span>
-                  <span className="font-mono font-semibold text-ink-900">scikit-learn RandomForestRegressor + Model Registry</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink-500">Frontend Stack:</span>
-                  <span className="font-mono font-semibold text-ink-900">React 19 + Vite + TailwindCSS + Recharts</span>
-                </div>
               </div>
             </div>
           )}

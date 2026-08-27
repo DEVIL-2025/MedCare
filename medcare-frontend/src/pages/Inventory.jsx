@@ -215,8 +215,26 @@ export default function Inventory() {
 
   // Derived Dynamic KPIs from Live Database Records for the current active filter context
   const totalUnits = useMemo(() => filtered.reduce((sum, p) => sum + Number(p.currentStock || 0), 0), [filtered]);
-  const lowStockCount = useMemo(() => filtered.filter((p) => (p.status === 'Low Stock' || p.status === 'LOW_STOCK' || (Number(p.currentStock || 0) < Number(p.reorderPoint || 0) && Number(p.currentStock || 0) > 0))).length, [filtered]);
-  const outOfStockCount = useMemo(() => filtered.filter((p) => Number(p.currentStock || 0) === 0 || p.status === 'Out of Stock' || p.status === 'OUT_OF_STOCK' || p.status === 'CRITICAL').length, [filtered]);
+
+  const lowStockCount = useMemo(() => filtered.filter((p) => {
+    const st = (p.status || '').toLowerCase();
+    const isLow = st === 'low stock' || p.hasLowStock || p.risk === 'high' ||
+      (Array.isArray(p.warehouseBreakdown) && p.warehouseBreakdown.some(w => (w.status || '').toLowerCase() === 'low stock')) ||
+      (Number(p.currentStock || 0) < Number(p.reorderPoint || 0) && Number(p.currentStock || 0) >= Number(p.safetyStock || 0) && Number(p.currentStock || 0) > 0);
+    const isCrit = st === 'critical' || st === 'out of stock' || p.hasCritical || p.risk === 'critical' ||
+      (Array.isArray(p.warehouseBreakdown) && p.warehouseBreakdown.some(w => ['critical', 'out of stock'].includes((w.status || '').toLowerCase())));
+    return isLow && !isCrit;
+  }).length, [filtered]);
+
+  const outOfStockCount = useMemo(() => filtered.filter((p) => {
+    const st = (p.status || '').toLowerCase();
+    return st === 'critical' ||
+      st === 'out of stock' ||
+      p.hasCritical ||
+      p.risk === 'critical' ||
+      Number(p.currentStock || 0) <= 0 ||
+      (Array.isArray(p.warehouseBreakdown) && p.warehouseBreakdown.some(w => ['critical', 'out of stock'].includes((w.status || '').toLowerCase()) || Number(w.currentStock || 0) <= 0));
+  }).length, [filtered]);
 
   function handleOpenTxModal(prod = null) {
     if (prod) {

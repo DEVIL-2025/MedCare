@@ -105,7 +105,6 @@ export default function Warehouses() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-lg border border-ink-100 shadow-card">
         <div>
           <h2 className="text-[16px] font-bold text-ink-900">Distribution Centers & Logistics Hubs</h2>
-          <p className="text-[12px] text-ink-500">Live multi-tier DC capacity tracking, stock valuation, and space utilization metrics.</p>
         </div>
         <button
           onClick={() => setAddModalOpen(true)}
@@ -117,10 +116,10 @@ export default function Warehouses() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Building2} tone="forest" label="Active Distribution Centers" value={overviewList.length} delta="Active Database nodes" />
+        <StatCard icon={Building2} tone="forest" label="Active Distribution Centers" value={overviewList.length} delta="Active DCs" />
         <StatCard icon={Boxes} tone="gold" label="Total Network Physical Stock" value={`${totalInventory.toLocaleString()} units`} delta="Physical inventory count" />
-        <StatCard icon={Gauge} tone="sage" label="Average Capacity Utilization" value={`${avgUtilization}%`} delta="Network capacity factor" />
-        <StatCard icon={AlertTriangle} tone="brick" label="DCs Requiring Attention" value={atRiskCount} delta="Imminent stockout / surge risk" deltaPositive={false} />
+        <StatCard icon={Gauge} tone="sage" label="Average Capacity Utilization" value={`${avgUtilization}%`} delta="Capacity factor" />
+        <StatCard icon={AlertTriangle} tone="brick" label="DCs Requiring Attention" value={atRiskCount} delta="stockout / surge risk" deltaPositive={false} />
       </div>
 
       {/* Filter and Search Bar */}

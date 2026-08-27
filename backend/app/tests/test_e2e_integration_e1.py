@@ -23,7 +23,7 @@ async def test_e1_end_to_end_pipeline():
         res = await session.execute(select(Inventory).where(Inventory.sku == "A-2381", Inventory.warehouse_id == "DEL-02"))
         initial_inv = res.scalars().first()
         prev_stock = initial_inv.current_stock if initial_inv else 1000
-        sale_qty = max(100, int(prev_stock - 400)) if prev_stock > 400 else 100
+        sale_qty = max(100, int(prev_stock - 50)) if prev_stock > 50 else int(prev_stock * 0.8)
 
         # 1. Execute Sale on A-2381 in DEL-02
         tx, inv = await InventoryEngine.process_transaction(

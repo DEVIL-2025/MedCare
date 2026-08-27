@@ -15,7 +15,7 @@ async def test_demand_sensing_forecast_calculation():
         assert "sensed_daily" in f_data
         assert "forecast_demand_next_30d" in f_data
         assert len(f_data["series"]) >= 30
-        assert f_data["forecast_confidence_pct"] == 87
+        assert "summary" in f_data
         assert f_data["trend_direction"] in ["Increasing", "Stable", "Decreasing"]
 
 

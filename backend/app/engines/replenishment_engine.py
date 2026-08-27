@@ -20,6 +20,8 @@ class ReplenishmentEngine:
     service-level targets, and order frequencies based on live ML forecasts and batch expiries.
     """
 
+    TRANSFER_UNIT_FREIGHT_COST = 3.0
+
     @staticmethod
     async def sync_recommendations(
         session: AsyncSession,
@@ -63,19 +65,20 @@ class ReplenishmentEngine:
 
         for inv, prod in items:
             wh = warehouses_map.get(inv.warehouse_id)
-            lead_time = wh.lead_time_days if wh else 5
+            lead_time = wh.lead_time_days if (wh and wh.lead_time_days) else 5
 
             # Forecast lookup
-            f_data = all_forecasts.get(f"{inv.sku}_{inv.warehouse_id}", {
-                "sensed_daily": 50.0,
-                "forecast_demand_next_30d": 1500,
-                "surge_detected": False
-            })
-            daily_sensed = max(1.0, float(f_data.get("sensed_daily", 50.0)))
-            forecast_30d = float(f_data.get("forecast_demand_next_30d", 1500))
-            surge_detected = bool(f_data.get("surge_detected", False))
+            f_data = all_forecasts.get(f"{inv.sku}_{inv.warehouse_id}")
+            if f_data and "sensed_daily" in f_data:
+                daily_sensed = float(f_data["sensed_daily"])
+                forecast_30d = float(f_data.get("forecast_demand_next_30d", daily_sensed * 30.0))
+                surge_detected = bool(f_data.get("surge_detected", False))
+            else:
+                daily_sensed = float(inv.reorder_point / 30.0) if inv.reorder_point > 0 else 0.0
+                forecast_30d = daily_sensed * 30.0
+                surge_detected = False
 
-            # Required Stock Calculation
+            # Required Stock Calculation (Coherent Policy)
             lead_time_demand = daily_sensed * (lead_time + settings.LEAD_TIME_BUFFER_DAYS)
             target_stock = lead_time_demand + inv.safety_stock
             effective_inventory = inv.available_stock + inv.inbound_stock
@@ -87,13 +90,20 @@ class ReplenishmentEngine:
             if net_shortfall <= 0 and inv.current_stock >= inv.reorder_point:
                 if existing_rec is not None and existing_rec.status == "PENDING":
                     existing_rec.status = "RESOLVED"
-                    existing_rec.reason_impact = f"Resolved: Stock restored to {inv.current_stock:,} units ({round(inv.current_stock / daily_sensed, 1)} days of cover)."
+                    doc_disp = f"{round(inv.current_stock / daily_sensed, 1)} days of cover" if daily_sensed > 0 else "N/A"
+                    existing_rec.reason_impact = f"Resolved: Stock restored to {inv.current_stock:,} units ({doc_disp})."
                 continue
 
-            # Recommended Quantity = ML Forecasted Demand - Current Stock
-            recommended_qty = max(0, int(round(forecast_30d - inv.current_stock)))
+            # Recommended Quantity = max(0, Target Stock - Effective Inventory)
+            raw_recommended_qty = max(0, int(round(net_shortfall)))
+            if raw_recommended_qty > 0 and prod.moq > 0:
+                recommended_qty = max(prod.moq, int((raw_recommended_qty + prod.moq - 1) // prod.moq * prod.moq))
+            else:
+                recommended_qty = raw_recommended_qty
 
-            doc = inv.available_stock / daily_sensed
+            doc = (inv.available_stock / daily_sensed) if daily_sensed > 0 else float("inf")
+            doc_str = f"{round(doc, 1)}d" if doc != float("inf") else "N/A"
+
             if doc <= lead_time or inv.current_stock <= 0:
                 priority = "critical"
                 frequency = "Every 7 days (Surge Cadence)" if surge_detected else "Every 10 days"
@@ -119,12 +129,20 @@ class ReplenishmentEngine:
             if matching_trf and settings.TRANSFER_FIRST_ENABLED:
                 decision_type = "TRANSFER"
                 preferred_source = matching_trf.source_warehouse_id
-                cost_inr = round(recommended_qty * 3.0, 2)
-                reason_what = f"Transfer {matching_trf.quantity:,} units of {prod.name} from {matching_trf.source_warehouse_id} to {inv.warehouse_id}"
+                transfer_qty = min(recommended_qty, matching_trf.quantity)
+                procurement_qty = max(0, recommended_qty - transfer_qty)
+
+                transfer_cost = round(transfer_qty * ReplenishmentEngine.TRANSFER_UNIT_FREIGHT_COST, 2)
+                procurement_cost = round(procurement_qty * prod.unit_cost, 2)
+                cost_inr = round(transfer_cost + procurement_cost, 2)
+
+                trf_detail = f"Transfer {transfer_qty:,} units from {matching_trf.source_warehouse_id}"
+                proc_detail = f" and procure {procurement_qty:,} units from supplier" if procurement_qty > 0 else ""
+                reason_what = f"{trf_detail}{proc_detail} for {prod.name}"
                 reason_why = (
-                    f"{inv.warehouse_id} stock covers {round(doc, 1)} days vs {lead_time}d lead time. "
+                    f"{inv.warehouse_id} stock covers {doc_str} vs {lead_time}d lead time. "
                     f"{matching_trf.source_warehouse_id} holds excess near-expiry inventory. "
-                    f"Transfer avoids ₹{round(recommended_qty * prod.unit_cost, 2):,} in new procurement."
+                    f"Transfer avoids ₹{round(transfer_qty * prod.unit_cost, 2):,} in new procurement."
                 )
                 reason_when = "Dispatch transfer immediately (3-day inter-DC transit)."
                 reason_impact = (
@@ -136,11 +154,12 @@ class ReplenishmentEngine:
                 cost_inr = round(recommended_qty * prod.unit_cost, 2)
                 reason_what = f"Procure {recommended_qty:,} units of {prod.name} from {preferred_source}"
                 reason_why = (
-                    f"Current stock ({inv.current_stock:,}) is below reorder threshold ({inv.reorder_point:,}). "
+                    f"Current stock ({inv.current_stock:,}) is below target threshold ({int(target_stock):,}). "
                     f"30-day sensed ML forecast is {int(forecast_30d):,} units."
                 )
                 reason_when = f"Issue Purchase Order within {24 if priority == 'critical' else 48} hours."
-                reason_impact = f"Restores stock cover to {round((inv.current_stock + recommended_qty) / daily_sensed, 1)} days and maintains {int(settings.SERVICE_LEVEL * 100)}% service level."
+                new_cover = f"{round((inv.current_stock + recommended_qty) / daily_sensed, 1)} days" if daily_sensed > 0 else "N/A"
+                reason_impact = f"Restores stock cover to {new_cover} and maintains {int(settings.SERVICE_LEVEL * 100)}% service level."
 
             if existing_rec:
                 existing_rec.current_stock = inv.current_stock

@@ -29,6 +29,8 @@ from backend.app.routers import (
     suppliers
 )
 
+from backend.app.services.email_alert_service import PeriodicEmailAlertScheduler
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI):
         async with AsyncSessionLocal() as session:
             await seed_database(session)
         logger.info("MedCare SCM Control Tower backend started successfully with PostgreSQL.")
+        PeriodicEmailAlertScheduler.start()
     except Exception as e:
         logger.error(
             f"[Startup Error] PostgreSQL database connection failed: {e}. "
@@ -52,6 +55,7 @@ async def lifespan(app: FastAPI):
         )
     yield
     logger.info("Shutting down MedCare SCM Control Tower backend...")
+    PeriodicEmailAlertScheduler.stop()
 
 
 app = FastAPI(

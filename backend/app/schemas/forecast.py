@@ -11,7 +11,7 @@ class ForecastSummary(BaseModel):
     forecast_demand_next_30d: int
     predicted_peak_units: int
     predicted_peak_date: str
-    forecast_confidence_pct: int
+    forecast_confidence_pct: Optional[int] = None
     trend_direction: str
     trend_description: str
 

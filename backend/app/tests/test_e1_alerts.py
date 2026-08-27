@@ -36,6 +36,7 @@ async def test_alert_creation_and_escalation_deadline():
             action="resolve"
         )
         assert resolved_alert.status == "Resolved"
+        assert resolved_alert.severity == "critical"  # Preserves original severity
         await session.rollback()
 
 

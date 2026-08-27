@@ -192,3 +192,26 @@ def test_trigger_async_low_stock_check_non_blocking():
     # Should schedule background coroutine without error
     trigger_async_low_stock_check(sku="P-1042", warehouse_id="MUM-01")
     trigger_async_low_stock_check()
+
+
+@pytest.mark.asyncio
+async def test_configurable_interval_hours():
+    from backend.app.services.email_alert_service import PeriodicEmailAlertScheduler
+    async with AsyncSessionLocal() as session:
+        # Set interval to 3 hours
+        res = await session.execute(select(SystemSetting).where(SystemSetting.key == "alert_interval_hours"))
+        setting = res.scalar_one_or_none()
+        if setting:
+            setting.value = "3"
+        else:
+            session.add(SystemSetting(key="alert_interval_hours", value="3"))
+        await session.commit()
+
+        interval = await EmailAlertService.get_configured_interval_hours(session)
+        assert interval == 3
+
+        # Test scheduler start and stop
+        PeriodicEmailAlertScheduler.start()
+        assert PeriodicEmailAlertScheduler._running is True
+        PeriodicEmailAlertScheduler.stop()
+        assert PeriodicEmailAlertScheduler._running is False

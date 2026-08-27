@@ -196,10 +196,46 @@ export default function DemandForecast() {
 
       {/* Forecast Summary Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Activity} tone="forest" label="Historical Baseline (30d)" value={summary.avg_daily_demand_last_30d || '420 units/day'} delta="Past run-rate velocity" />
-        <StatCard icon={TrendingUp} tone="gold" label={`Projected Demand (${horizon})`} value={summary.forecast_demand_next_30d || '14,800 units'} delta={summary.trend || 'Upward'} />
-        <StatCard icon={Target} tone="brick" label="Predicted Peak Daily Volume" value={summary.predicted_peak_units || '680 units'} delta={summary.predicted_peak_date || 'Peak date'} deltaPositive={false} />
-        <StatCard icon={Gauge} tone="sage" label="Statistical Confidence (R²)" value={`${metrics.r2_score ? (metrics.r2_score * 100).toFixed(1) + '%' : '97.1%'}`} delta={`Validation MAE: ±${metrics.mae_units || 21.8} units`} />
+        <StatCard
+          icon={Activity}
+          tone="forest"
+          label="Historical Baseline (30d)"
+          value={summary.avg_daily_demand_last_30d ?? "—"}
+          delta="Past run-rate velocity"
+        />
+
+        <StatCard
+          icon={TrendingUp}
+          tone="gold"
+          label={`Projected Demand (${horizon})`}
+          value={summary.forecast_demand_next_30d ?? "—"}
+          delta={summary.trend ?? "—"}
+        />
+
+        <StatCard
+          icon={Target}
+          tone="brick"
+          label="Predicted Peak Daily Volume"
+          value={summary.predicted_peak_units ?? "—"}
+          delta={summary.predicted_peak_date ?? "—"}
+          deltaPositive={false}
+        />
+
+        <StatCard
+          icon={Gauge}
+          tone="sage"
+          label="Model Fit (R²)"
+          value={
+            metrics.r2_score != null
+              ? `${(metrics.r2_score * 100).toFixed(1)}%`
+              : "—"
+          }
+          delta={
+            metrics.mae_units != null
+              ? `Validation MAE: ${metrics.mae_units} units`
+              : "Validation MAE: —"
+          }
+        />
       </div>
 
       {/* Multi-Signal Active Overlays Banner */}
@@ -259,7 +295,7 @@ export default function DemandForecast() {
         <div className="mb-3 p-3 bg-cream-100/90 rounded-md border border-ink-100 text-[11.5px] text-ink-700 flex items-start gap-2">
           <Sparkles size={15} className="text-forest-700 shrink-0 mt-0.5" />
           <div>
-            <strong className="text-ink-900">How to interpret this forecast:</strong> The green line shows confirmed daily sales actuals from historical data. The dashed gold line is the Random Forest forward demand projection adjusted for active external signals (epidemics, promotions, weather events). The gold shaded band represents the 95% confidence interval.
+            <strong className="text-ink-900">How to interpret this forecast:</strong> The green line shows confirmed daily sales actuals from historical data. The dashed gold line is the Random Forest forward demand projection adjusted for active external signals (epidemics, promotions, weather events). The gold shaded band represents the estimated demand range (±1.96 × RMSE).
           </div>
         </div>
 
@@ -272,9 +308,9 @@ export default function DemandForecast() {
               <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid #E2E5E1', fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12, color: '#68716D' }} />
               
-              {/* Confidence Interval Area */}
-              <Area type="monotone" dataKey="upper" stroke="none" fill="#D5A72C" fillOpacity={0.15} name="Upper Confidence (95%)" />
-              <Area type="monotone" dataKey="lower" stroke="none" fill="#FFFFFF" fillOpacity={1} name="Lower Confidence Bound" />
+              {/* Estimated Demand Range Area */}
+              <Area type="monotone" dataKey="upper" stroke="none" fill="#D5A72C" fillOpacity={0.15} name="Upper Bound (Estimated Range)" />
+              <Area type="monotone" dataKey="lower" stroke="none" fill="#FFFFFF" fillOpacity={1} name="Lower Bound (Estimated Range)" />
               
               {/* Historical Actuals */}
               <Line type="monotone" dataKey="actual" stroke="#177A5B" strokeWidth={2.5} dot={{ r: 3, fill: '#177A5B' }} name="Actual Historical Sales (Units)" connectNulls={false} />
@@ -295,44 +331,54 @@ export default function DemandForecast() {
               <Cpu size={16} className="text-forest-700" /> Model Transparency & Lineage
             </h3>
             <span className="text-[10.5px] px-2 py-0.5 rounded bg-forest-100 text-forest-800 font-mono font-semibold">
-              {modelTransparency?.version || 'v1.2.0-prod'}
+              {modelTransparency?.version ?? '—'}
             </span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 text-[12px]">
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Model Architecture</span>
-              <span className="font-semibold text-ink-800 text-[13px]">{modelTransparency?.model_name || 'RandomForestRegressor'}</span>
+              <span className="font-semibold text-ink-800 text-[13px]">{modelTransparency?.model_name ?? '—'}</span>
             </div>
 
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Primary DB Source</span>
-              <span className="font-mono font-semibold text-forest-800 text-[13px]">{lineage.primary_table || 'demand_history'}</span>
+              <span className="font-mono font-semibold text-forest-800 text-[13px]">{lineage.primary_table ?? '—'}</span>
             </div>
 
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Training Set Volume</span>
-              <span className="font-mono font-semibold text-ink-800 text-[13px]">{lineage.training_samples?.toLocaleString() || '16,848'} rows</span>
+              <span className="font-mono font-semibold text-ink-800 text-[13px]">
+                {lineage.training_samples != null ? `${lineage.training_samples.toLocaleString()} rows` : '—'}
+              </span>
             </div>
 
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Hold-Out Validation</span>
-              <span className="font-mono font-semibold text-ink-800 text-[13px]">{lineage.validation_samples?.toLocaleString() || '4,212'} rows (20%)</span>
+              <span className="font-mono font-semibold text-ink-800 text-[13px]">
+                {lineage.validation_samples != null ? `${lineage.validation_samples.toLocaleString()} rows (20%)` : '—'}
+              </span>
             </div>
 
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Validation MAE</span>
-              <span className="font-mono font-bold text-forest-700 text-[13px]">±{metrics.mae_units || 21.8} units</span>
+              <span className="font-mono font-bold text-forest-700 text-[13px]">
+                {metrics.mae_units != null ? `${metrics.mae_units} units` : '—'}
+              </span>
             </div>
 
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100">
               <span className="text-ink-500 block text-[11px]">Weighted Abs Error (WAPE)</span>
-              <span className="font-mono font-bold text-forest-700 text-[13px]">{metrics.wape_pct || 7.1}%</span>
+              <span className="font-mono font-bold text-forest-700 text-[13px]">
+                {metrics.wape_pct != null ? `${metrics.wape_pct}%` : '—'}
+              </span>
             </div>
 
             <div className="p-3 bg-cream-100/60 rounded-md border border-ink-100 sm:col-span-2 lg:col-span-2">
-              <span className="text-ink-500 block text-[11px]">R² Accuracy Score</span>
-              <span className="font-mono font-bold text-forest-700 text-[13px]">{metrics.r2_score || 0.971}</span>
+              <span className="text-ink-500 block text-[11px]">Model Fit (R²)</span>
+              <span className="font-mono font-bold text-forest-700 text-[13px]">
+                {metrics.r2_score != null ? metrics.r2_score : '—'}
+              </span>
             </div>
           </div>
         </div>

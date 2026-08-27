@@ -651,7 +651,8 @@ async def seed_database(session: AsyncSession, force: bool = False):
         SystemSetting(key="lead_time_buffer_days", category="Replenishment", value="2", description="Buffer added to supplier lead times"),
         SystemSetting(key="auto_approve_threshold_inr", category="Replenishment", value="100000", description="Automatic replenishment PO approval threshold in INR"),
         SystemSetting(key="manager_approval_threshold_inr", category="Replenishment", value="500000", description="Manager sign-off threshold in INR"),
-        SystemSetting(key="transfer_first_policy", category="Replenishment", value="Enabled", description="Always evaluate feasible network transfers before new procurement")
+        SystemSetting(key="transfer_first_policy", category="Replenishment", value="Enabled", description="Always evaluate feasible network transfers before new procurement"),
+        SystemSetting(key="alert_interval_hours", category="Notification", value="2", description="Interval frequency in hours for periodic low stock email digests (e.g. 1, 2, 3, 6, 12, 24)")
     ]
     session.add_all(settings_entries)
     await session.flush()

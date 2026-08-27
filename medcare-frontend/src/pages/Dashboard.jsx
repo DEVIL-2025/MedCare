@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   DollarSign, Package, AlertTriangle, Truck, ShieldAlert, Activity,
-  ArrowRightLeft, Check, Sparkles, Layers, CheckCircle2, AlertCircle, Building
+  ArrowRightLeft, Check, Sparkles, Layers, CheckCircle2, AlertCircle, Building, AlertOctagon
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/ui/StatCard';
@@ -106,10 +106,18 @@ export default function Dashboard() {
         <StatCard
           icon={AlertTriangle}
           tone="brick"
-          label="Critical Out-of-Stock SKUs"
+          label="Critical / Stockout SKUs"
           value={kpis.critical_skus || 0}
-          delta={kpis.critical_skus > 0 ? "Immediate rebalance needed" : "Zero stockouts in scope"}
+          delta={kpis.critical_skus > 0 ? `${kpis.critical_skus} SKU below safety stock` : "Zero stockouts in scope"}
           deltaPositive={kpis.critical_skus === 0}
+        />
+        <StatCard
+          icon={AlertOctagon}
+          tone="warning"
+          label="Low Stock SKUs"
+          value={kpis.low_stock_skus || 0}
+          delta={kpis.low_stock_skus > 0 ? `${kpis.low_stock_skus} SKU below reorder point` : "All SKUs above reorder point"}
+          deltaPositive={kpis.low_stock_skus === 0}
         />
         <StatCard
           icon={Truck}
@@ -119,14 +127,6 @@ export default function Dashboard() {
           delta="Dynamic lead-time threshold"
           deltaPositive={false}
         />
-        {/* <StatCard
-          icon={ShieldAlert}
-          tone="sage"
-          label="Network Inventory Health"
-          value={kpis.inventory_health || '100%'}
-          delta={selectedWarehouse === 'All' ? '3 Active DC Nodes' : `${selectedWarehouse} DC Node`}
-          deltaPositive={true}
-        /> */}
       </div>
 
       {/* Main Grid: Demand Outlook Chart & Recommended Action */}

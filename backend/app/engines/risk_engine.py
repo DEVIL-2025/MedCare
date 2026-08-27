@@ -28,32 +28,38 @@ class RiskEngine:
         Calculates Days of Cover, Stockout Risk Score, Estimated Stockout Date, and Expiry Risk.
         Returns None when no inventory record exists for the SKU and warehouse.
         """
+        clean_sku = sku.strip().upper() if sku else ""
+        clean_wh_id = warehouse_id.strip().upper() if warehouse_id else ""
         today = get_today_ist()
 
         # 1. Fetch Inventory & Warehouse Metadata
         inv_res = await session.execute(
-            select(Inventory).where(and_(Inventory.sku == sku, Inventory.warehouse_id == warehouse_id))
+            select(Inventory).where(and_(Inventory.sku == clean_sku, Inventory.warehouse_id == clean_wh_id))
         )
         inv = inv_res.scalars().first()
         if not inv:
             return None
 
-        wh_res = await session.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
+        wh_res = await session.execute(select(Warehouse).where(Warehouse.id == clean_wh_id))
         wh = wh_res.scalars().first()
-        lead_time = wh.lead_time_days if wh else 5
+        lead_time = wh.lead_time_days if (wh and wh.lead_time_days) else 5
 
         # 2. Get Sensed Daily Demand
         forecast_data = await DemandSensingEngine.compute_sku_warehouse_forecast(
-            session, sku, warehouse_id, horizon_days=30
+            session, clean_sku, clean_wh_id, horizon_days=30
         )
-        daily_sensed_demand = max(1.0, float(forecast_data["sensed_daily"]))
+        daily_sensed_demand = float(forecast_data["sensed_daily"]) if (forecast_data and "sensed_daily" in forecast_data) else 0.0
 
         # 3. Compute Days of Cover
         available_stock = float(inv.available_stock)
-        days_of_cover = round(available_stock / daily_sensed_demand, 1)
-        inv.days_of_cover = days_of_cover
+        if daily_sensed_demand > 0:
+            days_of_cover = round(available_stock / daily_sensed_demand, 1)
+            inv.days_of_cover = days_of_cover
+        else:
+            days_of_cover = float("inf")
+            inv.days_of_cover = 999.0
 
-        # 4. Stockout Risk Level & Score
+        # 4. Stockout Risk Level & Score (strictly bounded 0 to 100)
         lead_time_buffer = settings.LEAD_TIME_BUFFER_DAYS
         critical_cover_limit = lead_time
         high_cover_limit = lead_time + lead_time_buffer + 2
@@ -62,16 +68,19 @@ class RiskEngine:
             stockout_level = "critical"
             stockout_score = 100.0
             estimated_stockout_date = today
+        elif daily_sensed_demand <= 0:
+            stockout_level = "low"
+            stockout_score = 0.0
+            estimated_stockout_date = None
         elif days_of_cover <= critical_cover_limit:
             stockout_level = "critical"
-            # 85 to 99 based on how close to 0
-            stockout_score = min(99.0, 85.0 + (critical_cover_limit - days_of_cover) * 3.0)
+            stockout_score = min(100.0, max(85.0, 85.0 + (critical_cover_limit - days_of_cover) * 3.0))
             estimated_stockout_date = today + timedelta(days=max(1, int(days_of_cover)))
         elif days_of_cover <= high_cover_limit:
             stockout_level = "high"
-            stockout_score = 65.0 + (high_cover_limit - days_of_cover) * 4.0
+            stockout_score = min(84.0, max(50.0, 65.0 + (high_cover_limit - days_of_cover) * 4.0))
             estimated_stockout_date = today + timedelta(days=int(days_of_cover))
-        elif days_of_cover <= (inv.reorder_point / daily_sensed_demand):
+        elif inv.reorder_point > 0 and days_of_cover <= (inv.reorder_point / daily_sensed_demand):
             stockout_level = "medium"
             stockout_score = 40.0
             estimated_stockout_date = today + timedelta(days=int(days_of_cover))
@@ -84,8 +93,8 @@ class RiskEngine:
         batches_res = await session.execute(
             select(Batch).where(
                 and_(
-                    Batch.sku == sku,
-                    Batch.warehouse_id == warehouse_id,
+                    Batch.sku == clean_sku,
+                    Batch.warehouse_id == clean_wh_id,
                     Batch.quantity > 0
                 )
             )
@@ -94,20 +103,24 @@ class RiskEngine:
 
         near_expiry_units = 0
         critical_expiry_units = 0
+        expired_units = 0
         for b in batches:
             days_to_exp = (b.expiry_date - today).days
-            if days_to_exp <= settings.EXPIRY_CRITICAL_DAYS:
+            if days_to_exp <= 0:
+                expired_units += b.quantity
+                b.status = "EXPIRED"
+            elif days_to_exp <= settings.EXPIRY_CRITICAL_DAYS:
                 critical_expiry_units += b.quantity
-                b.status = "CRITICAL" if days_to_exp > 0 else "EXPIRED"
+                b.status = "CRITICAL"
             elif days_to_exp <= settings.EXPIRY_AT_RISK_DAYS:
                 near_expiry_units += b.quantity
                 b.status = "NEAR_EXPIRY"
 
-        if critical_expiry_units > 0:
+        if expired_units > 0 or critical_expiry_units > 0:
             expiry_level = "critical"
             expiry_score = 90.0
         elif near_expiry_units > 0:
-            expiry_level = "high" if near_expiry_units > (available_stock * 0.3) else "medium"
+            expiry_level = "high" if (available_stock > 0 and near_expiry_units > (available_stock * 0.3)) else "medium"
             expiry_score = 70.0 if expiry_level == "high" else 45.0
         else:
             expiry_level = "low"
@@ -117,25 +130,26 @@ class RiskEngine:
         inv.risk_level = stockout_level if stockout_score >= expiry_score else expiry_level
 
         # Summary text
+        doc_str = f"{days_of_cover} days" if days_of_cover != float("inf") else "N/A"
         summary = (
-            f"Stock covers {days_of_cover} days vs {lead_time}d lead time. "
+            f"Stock covers {doc_str} vs {lead_time}d lead time. "
             f"Stockout risk: {stockout_level.upper()} ({int(stockout_score)}/100). "
             f"Near-expiry units: {near_expiry_units + critical_expiry_units}."
         )
 
         risk_rec = InventoryRisk(
-            sku=sku,
-            warehouse_id=warehouse_id,
+            sku=clean_sku,
+            warehouse_id=clean_wh_id,
             current_inventory=inv.current_stock,
             daily_sensed_demand=daily_sensed_demand,
-            days_of_cover=days_of_cover,
+            days_of_cover=days_of_cover if days_of_cover != float("inf") else 999.0,
             lead_time_days=lead_time,
             safety_stock=inv.safety_stock,
-            stockout_risk_score=stockout_score,
+            stockout_risk_score=min(100.0, max(0.0, stockout_score)),
             stockout_risk_level=stockout_level,
             estimated_stockout_date=estimated_stockout_date,
             near_expiry_units=near_expiry_units + critical_expiry_units,
-            expiry_risk_score=expiry_score,
+            expiry_risk_score=min(100.0, max(0.0, expiry_score)),
             expiry_risk_level=expiry_level,
             risk_summary=summary,
             calculated_at=datetime.now(timezone.utc).replace(tzinfo=None)

@@ -32,6 +32,7 @@ from backend.app.routers.ws import ws_manager
 from backend.app.dependencies.auth import require_permission, get_optional_user
 from backend.app.models.auth import User
 from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_datetime, format_ist_date
+from backend.app.services.email_alert_service import trigger_async_low_stock_check
 
 router = APIRouter(prefix="/api/inventory", tags=["Inventory"])
 
@@ -529,6 +530,12 @@ async def record_sale(payload: SaleCreate, db: AsyncSession = Depends(get_db)) -
 
         await db.commit()
 
+        # Automatic Low-Stock Email Trigger post-commit
+        avail_stock = (inv.current_stock or 0) - (inv.reserved_stock or 0)
+        reorder_point = inv.reorder_point or 0
+        if avail_stock <= reorder_point:
+            trigger_async_low_stock_check(sku=payload.sku, warehouse_id=payload.warehouse_id)
+
         # Broadcast live event
         await ws_manager.broadcast({
             "event": "INVENTORY_TRANSACTION",
@@ -711,6 +718,12 @@ async def update_inventory_config(
     await ReplenishmentEngine.sync_recommendations(db)
 
     await db.commit()
+
+    # Automatic Low-Stock Email Trigger post-commit
+    avail_stock = (inv.current_stock or 0) - (inv.reserved_stock or 0)
+    reorder_point = inv.reorder_point or 0
+    if avail_stock <= reorder_point:
+        trigger_async_low_stock_check(sku=clean_sku, warehouse_id=clean_wh)
 
     # Broadcast WebSocket update
     await ws_manager.broadcast({

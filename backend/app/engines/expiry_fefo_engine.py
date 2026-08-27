@@ -43,14 +43,18 @@ class ExpiryFEFOEngine:
         """
         Selects batches in strict FEFO order, skipping expired or quarantined batches.
         """
+        clean_sku = sku.strip().upper() if sku else ""
+        clean_wh_id = warehouse_id.strip().upper() if warehouse_id else ""
         today = get_today_ist()
+
         batches_res = await session.execute(
             select(Batch).where(
                 and_(
-                    Batch.sku == sku,
-                    Batch.warehouse_id == warehouse_id,
+                    Batch.sku == clean_sku,
+                    Batch.warehouse_id == clean_wh_id,
                     Batch.expiry_date > today,
                     Batch.is_quarantined == False,
+                    Batch.status.notin_(["EXPIRED", "QUARANTINED", "DEPLETED"]),
                     Batch.quantity > 0
                 )
             ).order_by(Batch.expiry_date.asc())
@@ -71,7 +75,8 @@ class ExpiryFEFOEngine:
                 "batch_id": b.id,
                 "expiry_date": b.expiry_date.isoformat(),
                 "allocated_quantity": allocated,
-                "days_to_expiry": (b.expiry_date - today).days
+                "days_to_expiry": (b.expiry_date - today).days,
+                "batch": b
             })
             remaining -= allocated
 
@@ -81,10 +86,16 @@ class ExpiryFEFOEngine:
     async def calculate_aging_and_expiry_summary(session: AsyncSession) -> Dict[str, Any]:
         """
         Calculates network-wide inventory aging buckets and total financial value at risk.
+        Distinguishes inventory age (today - mfg_date) from remaining shelf life (expiry_date - today).
         """
         today = get_today_ist()
         batches_res = await session.execute(
-            select(Batch, Product).join(Product, Batch.sku == Product.sku).where(Batch.quantity > 0)
+            select(Batch, Product).join(Product, Batch.sku == Product.sku).where(
+                and_(
+                    Batch.quantity > 0,
+                    Batch.is_quarantined == False
+                )
+            )
         )
         records = batches_res.all()
 
@@ -97,15 +108,20 @@ class ExpiryFEFOEngine:
         }
         total_val = 0.0
         at_risk_val = 0.0
+        expired_val = 0.0
+        expiry_risk_units = 0
 
         for batch, prod in records:
-            age_days = (today - batch.mfg_date).days
+            age_days = max(0, (today - batch.mfg_date).days)
             batch_val = batch.quantity * prod.unit_cost
             total_val += batch_val
 
             days_to_exp = (batch.expiry_date - today).days
-            if days_to_exp <= 90:
+            if days_to_exp <= 0:
+                expired_val += batch_val
+            elif days_to_exp <= settings.EXPIRY_AT_RISK_DAYS:
                 at_risk_val += batch_val
+                expiry_risk_units += batch.quantity
 
             if age_days <= 30:
                 buckets["0-30"]["units"] += batch.quantity
@@ -137,6 +153,8 @@ class ExpiryFEFOEngine:
         return {
             "total_inventory_value_cr": round(total_val / 10000000.0, 2),
             "at_risk_value_cr": round(at_risk_val / 10000000.0, 2),
-            "usable_value_cr": round((total_val - at_risk_val) / 10000000.0, 2),
+            "expired_value_cr": round(expired_val / 10000000.0, 2),
+            "usable_value_cr": round(max(0.0, total_val - at_risk_val - expired_val) / 10000000.0, 2),
+            "expiry_risk_units": expiry_risk_units,
             "aging_summary": summary_list
         }

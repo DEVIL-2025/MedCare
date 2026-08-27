@@ -64,10 +64,12 @@ class ModelTrainingService:
             "features_used": FEATURE_COLUMNS,
             "metrics": val_metrics,
             "hyperparameters": {
-                "n_estimators": 100,
-                "max_depth": 12,
+                "n_estimators": 50,
+                "max_depth": 10,
                 "min_samples_split": 4,
-                "min_samples_leaf": 2
+                "min_samples_leaf": 2,
+                "random_state": 42,
+                "n_jobs": 1
             }
         }
 

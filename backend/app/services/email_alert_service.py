@@ -31,7 +31,8 @@ class EmailAlertService:
     @staticmethod
     def render_consolidated_digest_html(
         items: List[Dict[str, Any]],
-        frontend_url: str
+        frontend_url: str,
+        interval_hours: int = 2
     ) -> str:
         """
         Generates an executive, pharma-grade responsive HTML email digest template
@@ -189,7 +190,7 @@ class EmailAlertService:
             <td style="background-color: #f8fafc; padding: 18px 30px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11.5px; color: #64748b; line-height: 1.6;">
               <div><strong>MedCare Pharma SCM Control Tower</strong> &bull; Single Source of Truth: PostgreSQL</div>
               <div style="margin-top: 4px; color: #94a3b8;">
-                Alert generated on {timestamp_ist} ({timestamp_utc}) &bull; 24-hour deduplication active
+                Alert generated on {timestamp_ist} ({timestamp_utc}) &bull; {interval_hours}-hour periodic digest interval active
               </div>
             </td>
           </tr>
@@ -202,18 +203,38 @@ class EmailAlertService:
 </html>"""
 
     @classmethod
+    async def get_configured_interval_hours(cls, session: AsyncSession) -> int:
+        """
+        Fetches the user-configured low-stock digest interval in hours from SystemSetting.
+        Defaults to 2 hours if not explicitly set.
+        """
+        try:
+            res = await session.execute(
+                select(SystemSetting.value).where(SystemSetting.key == "alert_interval_hours")
+            )
+            val = res.scalar()
+            if val:
+                return max(1, int(float(val)))
+        except Exception as e:
+            logger.debug("[EmailAlertService] Error reading alert_interval_hours: %s", str(e))
+        return 2
+
+    @classmethod
     async def is_item_in_cooldown(
         cls,
         session: AsyncSession,
         sku: str,
         warehouse_id: str,
-        cooldown_hours: int = 24
+        cooldown_hours: Optional[int] = None
     ) -> bool:
         """
         Checks NotificationLog to verify whether an email alert for this specific (sku, warehouse_id)
-        was successfully delivered within the past cooldown window (default 24h).
+        was successfully delivered within the past cooldown window (configured in Settings, default 2h).
         Only checks logs with status SENT or DELIVERED (failed attempts do not trigger cooldown).
         """
+        if cooldown_hours is None:
+            cooldown_hours = await cls.get_configured_interval_hours(session)
+
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=cooldown_hours)
 
         res = await session.execute(
@@ -302,7 +323,8 @@ class EmailAlertService:
             logger.info("[EmailAlertService] No low-stock items detected in PostgreSQL.")
             return []
 
-        # 2. Filter items based on 24h deduplication cooldown
+        # 2. Filter items based on dynamic deduplication cooldown interval
+        interval_hours = await cls.get_configured_interval_hours(session)
         qualifying_items = []
         for inv, prod, wh in low_stock_records:
             sku = inv.sku
@@ -314,9 +336,9 @@ class EmailAlertService:
             deficit = max(0, reorder_pt - avail_stock)
 
             if not force_ignore_cooldown:
-                in_cooldown = await cls.is_item_in_cooldown(session, sku, wh_id, cooldown_hours=24)
+                in_cooldown = await cls.is_item_in_cooldown(session, sku, wh_id, cooldown_hours=interval_hours)
                 if in_cooldown:
-                    logger.info("[EmailAlertService] Cooldown active for %s @ %s (omitted from digest)", sku, wh_id)
+                    logger.info("[EmailAlertService] %dh Cooldown active for %s @ %s (omitted from digest)", interval_hours, sku, wh_id)
                     continue
 
             qualifying_items.append({
@@ -341,7 +363,7 @@ class EmailAlertService:
         )
 
         if not qualifying_items:
-            logger.info("[EmailAlertService] All %d low-stock items are currently within 24h cooldown.", len(low_stock_records))
+            logger.info("[EmailAlertService] All %d low-stock items are currently within %dh cooldown.", len(low_stock_records), interval_hours)
             return []
 
         # 3. Query dynamic recipients from database
@@ -356,7 +378,8 @@ class EmailAlertService:
 
         html_body = cls.render_consolidated_digest_html(
             items=qualifying_items,
-            frontend_url=settings.APP_FRONTEND_URL
+            frontend_url=settings.APP_FRONTEND_URL,
+            interval_hours=interval_hours
         )
 
         text_lines = [
@@ -462,3 +485,93 @@ def trigger_async_low_stock_check(sku: Optional[str] = None, warehouse_id: Optio
         threading.Thread(target=lambda: asyncio.run(_runner()), daemon=True).start()
     except Exception as e:
         logger.warning("[EmailAlertService] Failed to schedule background check task: %s", str(e))
+
+
+class PeriodicEmailAlertScheduler:
+    """
+    Automated background worker that runs continuously during FastAPI application lifespan.
+    Checks PostgreSQL at regular intervals (every 60 seconds). When alert_interval_hours has
+    elapsed since the last successful digest and active low-stock deficits exist in the database,
+    it dispatches an updated consolidated low-stock digest email.
+    """
+    _task: Optional[asyncio.Task] = None
+    _running: bool = False
+
+    @classmethod
+    def start(cls):
+        if cls._running or cls._task is not None:
+            return
+        cls._running = True
+        try:
+            loop = asyncio.get_running_loop()
+            cls._task = loop.create_task(cls._run_loop())
+            logger.info("[PeriodicEmailAlertScheduler] Background periodic email worker task started.")
+        except RuntimeError:
+            logger.warning("[PeriodicEmailAlertScheduler] No running event loop to start background periodic email worker.")
+
+    @classmethod
+    def stop(cls):
+        cls._running = False
+        if cls._task:
+            cls._task.cancel()
+            cls._task = None
+        logger.info("[PeriodicEmailAlertScheduler] Background periodic email worker stopped.")
+
+    @classmethod
+    async def _run_loop(cls):
+        # Initial brief wait on server startup
+        await asyncio.sleep(15)
+        while cls._running:
+            try:
+                async with AsyncSessionLocal() as session:
+                    # 1. Check if low stock alerts are enabled
+                    enabled_res = await session.execute(
+                        select(SystemSetting.value).where(SystemSetting.key == "low_stock_alerts_enabled")
+                    )
+                    enabled_val = enabled_res.scalar() or "Enabled"
+                    if str(enabled_val).strip().lower() == "disabled":
+                        await asyncio.sleep(60)
+                        continue
+
+                    # 2. Check configured interval in hours
+                    interval_hours = await EmailAlertService.get_configured_interval_hours(session)
+
+                    # 3. Check when the last successful email digest was dispatched
+                    last_log_res = await session.execute(
+                        select(NotificationLog.timestamp)
+                        .where(
+                            and_(
+                                NotificationLog.channel == "EMAIL",
+                                NotificationLog.status.in_(["SENT", "DELIVERED"])
+                            )
+                        )
+                        .order_by(NotificationLog.timestamp.desc())
+                        .limit(1)
+                    )
+                    last_sent_time = last_log_res.scalar()
+
+                    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                    should_check = False
+                    if last_sent_time is None:
+                        should_check = True
+                    else:
+                        elapsed_seconds = (now_utc - last_sent_time).total_seconds()
+                        if elapsed_seconds >= (interval_hours * 3600):
+                            should_check = True
+
+                    if should_check:
+                        logger.info(
+                            "[PeriodicEmailAlertScheduler] Periodic interval (%dh) elapsed since last digest. Running automated low-stock check...",
+                            interval_hours
+                        )
+                        await EmailAlertService.check_and_dispatch_low_stock_email_alerts(
+                            session=session,
+                            force_ignore_cooldown=False
+                        )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("[PeriodicEmailAlertScheduler] Background interval check error: %s", str(e))
+
+            # Sleep between background evaluation passes
+            await asyncio.sleep(60)

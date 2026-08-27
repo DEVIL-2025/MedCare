@@ -35,6 +35,9 @@ export default function Replenishment() {
   const [reviewItem, setReviewItem] = useState(null);
   const [fefoBatches, setFefoBatches] = useState([]);
   const [loadingFefo, setLoadingFefo] = useState(false);
+  const [reviewTransfer, setReviewTransfer] = useState(null);
+  const [transferBatches, setTransferBatches] = useState([]);
+  const [loadingTransferFefo, setLoadingTransferFefo] = useState(false);
   const [fefoExplorerSku, setFefoExplorerSku] = useState('P-1065');
   const [fefoExplorerWh, setFefoExplorerWh] = useState('MUM-01');
   const [explorerBatches, setExplorerBatches] = useState([]);
@@ -118,6 +121,28 @@ export default function Replenishment() {
     return () => { isMounted = false; };
   }, [reviewItem]);
 
+  useEffect(() => {
+    if (!reviewTransfer) {
+      setTransferBatches([]);
+      return;
+    }
+    let isMounted = true;
+    setLoadingTransferFefo(true);
+    api.getFefoBatches({
+      sku: reviewTransfer.sku,
+      warehouse_id: reviewTransfer.from,
+      required_qty: reviewTransfer.quantity
+    })
+      .then(res => {
+        if (isMounted) setTransferBatches(res?.allocations || []);
+      })
+      .catch(err => console.error('Transfer FEFO load error:', err))
+      .finally(() => {
+        if (isMounted) setLoadingTransferFefo(false);
+      });
+    return () => { isMounted = false; };
+  }, [reviewTransfer]);
+
   const loadExplorerBatches = useCallback(async () => {
     setLoadingExplorer(true);
     try {
@@ -183,6 +208,7 @@ export default function Replenishment() {
     try {
       await api.executeTransfer(transferId);
       setActionSuccess(`Transfer ${transferId} executed! Stock synchronized across DCs in database.`);
+      setReviewTransfer(null);
       triggerRefresh();
       await loadReplenishment();
       setTimeout(() => {
@@ -430,32 +456,41 @@ export default function Replenishment() {
                 <table className="w-full text-left text-[12.5px]">
                   <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
                     <tr>
-                      <th className="py-2.5 px-3">Product</th>
+                      <th className="py-2.5 px-3">Product & SKU</th>
                       <th className="py-2.5 px-3">From DC</th>
                       <th className="py-2.5 px-3">To DC</th>
                       <th className="py-2.5 px-3 text-right">Quantity</th>
                       <th className="py-2.5 px-3 text-right">Est. Savings</th>
-                      <th className="py-2.5 px-3">Strategic Rationale</th>
-                      <th className="py-2.5 px-3 text-right">Action</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
                     {filteredTransfers.map((t) => (
                       <tr key={t.id} className="hover:bg-cream-100/60 transition-colors">
-                        <td className="py-2.5 px-3 font-semibold text-ink-900">{t.product} ({t.sku})</td>
+                        <td className="py-2.5 px-3">
+                          <div className="font-semibold text-ink-900">{t.product}</div>
+                          <div className="text-[10.5px] text-ink-400 font-mono">{t.sku}</div>
+                        </td>
                         <td className="py-2.5 px-3 font-mono font-medium text-amber-800">{t.from}</td>
                         <td className="py-2.5 px-3 font-mono font-medium text-forest-800">{t.to}</td>
                         <td className="py-2.5 px-3 text-right font-bold">{t.quantity?.toLocaleString()}</td>
                         <td className="py-2.5 px-3 text-right font-semibold text-forest-700">{t.savings}</td>
-                        <td className="py-2.5 px-3 text-ink-600 max-w-xs truncate">{t.reason}</td>
                         <td className="py-2.5 px-3 text-right">
-                          <button
-                            onClick={() => handleExecuteTransfer(t.id)}
-                            disabled={actionProcessing}
-                            className="px-2.5 py-1 text-[11px] font-medium bg-forest-700 hover:bg-forest-600 text-white rounded shadow-xs cursor-pointer disabled:opacity-50"
-                          >
-                            Execute Transfer
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setReviewTransfer(t)}
+                              className="px-2.5 py-1 text-[11px] border border-ink-200 rounded hover:bg-cream-200 font-medium cursor-pointer"
+                            >
+                              View Why
+                            </button>
+                            <button
+                              onClick={() => handleExecuteTransfer(t.id)}
+                              disabled={actionProcessing}
+                              className="px-2.5 py-1 text-[11px] font-medium bg-forest-700 hover:bg-forest-600 text-white rounded shadow-xs cursor-pointer disabled:opacity-50"
+                            >
+                              Execute Transfer
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -776,6 +811,114 @@ export default function Replenishment() {
                 className="px-3.5 py-1.5 text-[12px] bg-forest-700 hover:bg-forest-600 text-white rounded font-medium shadow-xs cursor-pointer disabled:opacity-50"
               >
                 Approve & Execute
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* FEFO Transfer Explainable Decision Modal */}
+      {reviewTransfer && (
+        <Modal open={Boolean(reviewTransfer)} onClose={() => setReviewTransfer(null)} title={`FEFO Transfer Rationale: ${reviewTransfer.sku}`}>
+          <div className="space-y-4 text-[12.5px]">
+            <div className="p-3 bg-cream-200/80 rounded-md border border-ink-100 space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-ink-500">Product:</span>
+                <span className="font-semibold text-ink-900">{reviewTransfer.product} ({reviewTransfer.sku})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-500">Transfer Route:</span>
+                <span className="font-bold text-ink-900 font-mono">
+                  <span className="text-amber-800">{reviewTransfer.from}</span> → <span className="text-forest-800">{reviewTransfer.to}</span>
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-500">Transfer Quantity:</span>
+                <span className="font-bold text-forest-800">
+                  {Number(reviewTransfer.quantity || 0).toLocaleString()} units
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-500">Est. Financial Savings:</span>
+                <span className="font-semibold text-forest-700">{reviewTransfer.savings}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-500">Transit Lead Time:</span>
+                <span className="font-medium text-ink-800">{reviewTransfer.transferLeadTime || 3} days</span>
+              </div>
+            </div>
+
+            <div className="space-y-2 border-t border-ink-100 pt-3 text-[12px]">
+              <div>
+                <span className="font-bold text-ink-900 uppercase">WHAT:</span>
+                <p className="text-ink-700">{reviewTransfer.reasonWhat || `Transfer ${Number(reviewTransfer.quantity || 0).toLocaleString()} units from ${reviewTransfer.from} to ${reviewTransfer.to}.`}</p>
+              </div>
+              <div>
+                <span className="font-bold text-ink-900 uppercase">WHY FEFO TRANSFER:</span>
+                <p className="text-ink-700">{reviewTransfer.reasonWhy || reviewTransfer.reason || `Source DC (${reviewTransfer.from}) holds surplus stock with earlier expiry dates, whereas Destination DC (${reviewTransfer.to}) faces clinical stockout risk.`}</p>
+              </div>
+              <div>
+                <span className="font-bold text-ink-900 uppercase">WHEN:</span>
+                <p className="text-ink-700">{reviewTransfer.reasonWhen || `Transit lead time is ${reviewTransfer.transferLeadTime || 3} days. Immediate dispatch recommended to prevent stockout and avoid batch expiration.`}</p>
+              </div>
+              <div>
+                <span className="font-bold text-forest-800 uppercase">BENEFIT & IMPACT:</span>
+                <p className="text-forest-800 font-medium">{reviewTransfer.reasonImpact || `Saves ${reviewTransfer.savings} by avoiding emergency supplier procurement and preventing near-expiry inventory write-offs.`}</p>
+              </div>
+            </div>
+
+            {/* Source Batch FEFO Allocation Breakdown inside Modal */}
+            <div className="border-t border-ink-100 pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-ink-900">Source DC ({reviewTransfer.from}) FEFO Batch Allocation</span>
+                <span className="text-[11px] text-ink-500 font-medium">Earliest expiry dispatched first</span>
+              </div>
+
+              {loadingTransferFefo ? (
+                <div className="py-4 text-center text-ink-400 text-[11.5px]">Loading source batch allocations from Database...</div>
+              ) : transferBatches.length === 0 ? (
+                <div className="p-2.5 rounded bg-cream-200 text-ink-700 text-[11px] border border-ink-200">
+                  Batch {reviewTransfer.batchId || 'BAT-FEFO-AUTO'} allocated from {reviewTransfer.from}.
+                </div>
+              ) : (
+                <div className="max-h-36 overflow-y-auto border border-ink-100 rounded">
+                  <table className="w-full text-left text-[11.5px]">
+                    <thead className="bg-cream-200/80 text-ink-500 font-semibold sticky top-0">
+                      <tr>
+                        <th className="py-1.5 px-2">Batch #</th>
+                        <th className="py-1.5 px-2">Expiry Date</th>
+                        <th className="py-1.5 px-2">Days Remaining</th>
+                        <th className="py-1.5 px-2 text-right">Allocated Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-ink-100">
+                      {transferBatches.map((b) => (
+                        <tr key={b.batch_id} className="hover:bg-cream-100">
+                          <td className="py-1.5 px-2 font-mono font-medium">{b.batch_id}</td>
+                          <td className="py-1.5 px-2 text-ink-700">{b.expiry_date}</td>
+                          <td className="py-1.5 px-2 font-medium text-amber-800">{b.days_to_expiry} days</td>
+                          <td className="py-1.5 px-2 text-right font-bold text-forest-700">{b.allocated_quantity?.toLocaleString()} units</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-ink-100">
+              <button
+                onClick={() => setReviewTransfer(null)}
+                className="px-3 py-1.5 text-[12px] border border-ink-200 rounded text-ink-700 hover:bg-cream-200 font-medium cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => handleExecuteTransfer(reviewTransfer.id)}
+                disabled={actionProcessing}
+                className="px-3.5 py-1.5 text-[12px] bg-forest-700 hover:bg-forest-600 text-white rounded font-medium shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                Execute Transfer
               </button>
             </div>
           </div>

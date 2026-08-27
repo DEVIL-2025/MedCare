@@ -76,10 +76,10 @@ async def get_model_transparency(db: AsyncSession = Depends(get_db)):
         "training_window": info.get("date_range", {"start": "2026-05-24", "end": "2026-08-24"})
     }
     accuracy_obj = {
-        "r2_score": metrics.get("r2", 0.88),
-        "wape_pct": metrics.get("wape", 8.4),
-        "mae_units": metrics.get("mae", 28.5),
-        "rmse_units": metrics.get("rmse", 42.1)
+        "r2_score": metrics.get("r2_score", metrics.get("r2")),
+        "wape_pct": metrics.get("wape_pct", metrics.get("wape")),
+        "mae_units": metrics.get("mae"),
+        "rmse_units": metrics.get("rmse")
     }
 
     return {

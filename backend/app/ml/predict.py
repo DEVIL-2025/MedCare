@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.ml.train import MODEL_FILE, ModelTrainingService
-from backend.app.ml.feature_engineering import FEATURE_COLUMNS
+from backend.app.ml.feature_engineering import FEATURE_COLUMNS, FeatureEngineeringService
 from backend.app.models.demand import DemandHistory, SeasonalEvent
 from backend.app.models.product import Product
 from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_date, format_ist_datetime
@@ -72,7 +72,7 @@ class PredictionService:
         events_res = await session.execute(select(SeasonalEvent))
         events = events_res.scalars().all()
 
-        residual_sigma = float(metadata["metrics"]["rmse"]) if metadata and "metrics" in metadata else 25.0
+        residual_sigma = float(metadata["metrics"]["rmse"]) if metadata and "metrics" in metadata and "rmse" in metadata["metrics"] else 25.0
         forecast_dates = [today + timedelta(days=i + 1) for i in range(horizon_days)]
 
         keys = list(history_map.keys())
@@ -93,30 +93,13 @@ class PredictionService:
             unit_costs.append(float(p.unit_cost) if p else 50.0)
             categories.append(p.category if p else "Analgesics")
 
-        # 2. Vectorized 30-day multi-step rollout: 1 matrix predict call per forecast day
+        # 2. Vectorized multi-step rollout: 1 matrix predict call per forecast day
         for d_idx, f_date in enumerate(forecast_dates):
-            dow = float(f_date.weekday())
-            dom = float(f_date.day)
-            month = float(f_date.month)
-            is_weekend = 1.0 if dow >= 5.0 else 0.0
-
             X_step = np.zeros((N, 17), dtype=np.float32)
-            seasonal_uplifts = np.zeros(N, dtype=np.float32)
 
             for i in range(N):
                 buf = rolling_buffers[i]
                 cat = categories[i]
-
-                lag_1 = buf[-1]
-                lag_7 = buf[-7] if len(buf) >= 7 else lag_1
-                lag_14 = buf[-14] if len(buf) >= 14 else lag_1
-                lag_21 = buf[-21] if len(buf) >= 21 else lag_1
-
-                r_7 = float(np.mean(buf[-7:]))
-                r_std_7 = float(np.std(buf[-7:])) if len(buf) >= 7 else 10.0
-                r_14 = float(np.mean(buf[-14:]))
-                r_30 = float(np.mean(buf[-30:]))
-                vel_ratio = r_7 / (r_30 + 1e-5)
 
                 s_uplift = 0.0
                 for ev in events:
@@ -126,26 +109,19 @@ class PredictionService:
                             s_uplift = float(ev.expected_uplift_pct or 60.0) / 100.0
                             seasonal_flags[i] = True
 
-                seasonal_uplifts[i] = s_uplift
-                dist_orders = 5.0 if s_uplift > 0 else 2.0
-                is_promo = 1.0 if s_uplift > 0 else 0.0
-
-                X_step[i, :] = [
-                    lag_1, lag_7, lag_14, lag_21,
-                    r_7, r_std_7, r_14, r_30,
-                    vel_ratio, dow, dom, month, is_weekend,
-                    s_uplift, dist_orders, is_promo, unit_costs[i]
-                ]
+                feat_vec = FeatureEngineeringService.compute_step_features(
+                    buf=buf,
+                    forecast_date=f_date,
+                    seasonal_uplift_pct=s_uplift,
+                    unit_cost=unit_costs[i]
+                )
+                X_step[i, :] = feat_vec
 
             # Matrix prediction for all SKU-DCs at once
-            preds = model.predict(X_step)
+            preds = model.predict(pd.DataFrame(X_step, columns=FEATURE_COLUMNS))
 
             for i in range(N):
-                pred_val = float(preds[i])
-                if seasonal_uplifts[i] > 0:
-                    pred_val = pred_val * (1.0 + seasonal_uplifts[i])
-                pred_val = max(1.0, pred_val)
-
+                pred_val = max(1.0, float(preds[i]))
                 forecast_matrices[i].append(pred_val)
                 rolling_buffers[i].append(pred_val)
 
@@ -158,18 +134,18 @@ class PredictionService:
             forecast_values = forecast_matrices[i]
             is_seasonal_event_active = seasonal_flags[i]
 
-            baseline_30d = float(np.mean(actual_series[-30:]))
-            sensed_daily = float(np.mean(forecast_values))
+            baseline_30d = float(np.mean(actual_series[-30:])) if actual_series else 0.0
+            sensed_daily = float(np.mean(forecast_values)) if forecast_values else 0.0
             total_forecast_demand = int(np.sum(forecast_values))
 
             surge_pct = round(((sensed_daily - baseline_30d) / max(1.0, baseline_30d)) * 100.0, 1)
             if is_seasonal_event_active and surge_pct < 25.0:
-                surge_pct = 60.0
+                surge_pct = 50.0
             surge_detected = surge_pct >= 25.0 or is_seasonal_event_active
 
-            peak_idx = int(np.argmax(forecast_values))
-            peak_val = forecast_values[peak_idx]
-            peak_date = forecast_dates[peak_idx]
+            peak_idx = int(np.argmax(forecast_values)) if forecast_values else 0
+            peak_val = forecast_values[peak_idx] if forecast_values else 0.0
+            peak_date = forecast_dates[peak_idx] if forecast_dates else today
 
             result_item = {
                 "sku": sku,
@@ -182,11 +158,9 @@ class PredictionService:
                 "total_forecast_demand": total_forecast_demand,
                 "predicted_peak_units": int(round(peak_val)),
                 "predicted_peak_date": f"Peak: {peak_date.strftime('%d %b')}",
-                "forecast_confidence_pct": 87,
-                "confidence_level_pct": 87.4,
                 "trend_direction": "Increasing" if surge_pct > 0 else ("Decreasing" if surge_pct < -5 else "Stable"),
-                "trend_description": "Driven by flu season onset" if surge_detected else "Normal baseline consumption",
-                "primary_driver": "Seasonal Flu Uplift (+60%)" if surge_detected else "Baseline Dispensing Velocity",
+                "trend_description": "Driven by flu season onset" if surge_detected and is_seasonal_event_active else ("Upward demand trajectory" if surge_pct > 0 else "Normal baseline consumption"),
+                "primary_driver": "Seasonal Flu Uplift" if surge_detected and is_seasonal_event_active else "Baseline Dispensing Velocity",
                 "surge_detected": surge_detected,
                 "surge_pct": surge_pct,
                 "summary": {
@@ -194,10 +168,9 @@ class PredictionService:
                     "forecast_demand_next_30d": f"{total_forecast_demand:,} units",
                     "predicted_peak_units": f"{int(round(peak_val))} units",
                     "predicted_peak_date": f"Peak: {peak_date.strftime('%d %b')}",
-                    "forecast_confidence": "87.4%",
                     "trend": f"Upward (+{surge_pct}%)" if surge_pct > 0 else f"Steady ({surge_pct}%)",
-                    "trend_description": "Driven by flu season onset" if surge_detected else "Normal baseline consumption",
-                    "primary_driver": "Seasonal Flu Uplift (+60%)" if surge_detected else "Baseline Dispensing Velocity"
+                    "trend_description": "Driven by flu season onset" if surge_detected and is_seasonal_event_active else ("Upward demand trajectory" if surge_pct > 0 else "Normal baseline consumption"),
+                    "primary_driver": "Seasonal Flu Uplift" if surge_detected and is_seasonal_event_active else "Baseline Dispensing Velocity"
                 }
             }
 
@@ -264,8 +237,37 @@ class PredictionService:
         actual_series = [float(r.actual_sales) for r in dh_rows]
 
         if not actual_series:
-            # Fallback if no history
-            actual_series = [50.0] * 30
+            return {
+                "status": "insufficient_data",
+                "message": f"Insufficient historical demand data available for SKU {sku} in warehouse {warehouse_id}.",
+                "sku": sku,
+                "warehouse_id": warehouse_id,
+                "horizon_days": horizon_days,
+                "baseline_daily": 0.0,
+                "sensed_daily": 0.0,
+                "avg_daily_demand_last_30d": 0,
+                "forecast_demand_next_30d": 0,
+                "total_forecast_demand": 0,
+                "predicted_peak_units": 0,
+                "predicted_peak_date": "—",
+                "trend_direction": "Stable",
+                "trend_description": "Insufficient historical data",
+                "primary_driver": "N/A",
+                "surge_detected": False,
+                "surge_pct": 0.0,
+                "chart_series": [],
+                "series": [],
+                "forecastPoints": [],
+                "summary": {
+                    "avg_daily_demand_last_30d": "—",
+                    "forecast_demand_next_30d": "—",
+                    "predicted_peak_units": "—",
+                    "predicted_peak_date": "—",
+                    "trend": "—",
+                    "trend_description": "Insufficient historical data",
+                    "primary_driver": "N/A"
+                }
+            }
 
         prod_res = await session.execute(select(Product).where(Product.sku == sku))
         prod = prod_res.scalars().first()
@@ -275,7 +277,7 @@ class PredictionService:
         events_res = await session.execute(select(SeasonalEvent))
         events = events_res.scalars().all()
 
-        residual_sigma = float(metadata["metrics"]["rmse"]) if metadata and "metrics" in metadata else 25.0
+        residual_sigma = float(metadata["metrics"]["rmse"]) if metadata and "metrics" in metadata and "rmse" in metadata["metrics"] else 25.0
         forecast_dates = [today + timedelta(days=i + 1) for i in range(horizon_days)]
 
         rolling_buf = list(actual_series)
@@ -283,22 +285,6 @@ class PredictionService:
         is_seasonal_event_active = False
 
         for f_date in forecast_dates:
-            dow = float(f_date.weekday())
-            dom = float(f_date.day)
-            month = float(f_date.month)
-            is_weekend = 1.0 if dow >= 5.0 else 0.0
-
-            lag_1 = rolling_buf[-1]
-            lag_7 = rolling_buf[-7] if len(rolling_buf) >= 7 else lag_1
-            lag_14 = rolling_buf[-14] if len(rolling_buf) >= 14 else lag_1
-            lag_21 = rolling_buf[-21] if len(rolling_buf) >= 21 else lag_1
-
-            r_7 = float(np.mean(rolling_buf[-7:]))
-            r_std_7 = float(np.std(rolling_buf[-7:])) if len(rolling_buf) >= 7 else 10.0
-            r_14 = float(np.mean(rolling_buf[-14:]))
-            r_30 = float(np.mean(rolling_buf[-30:]))
-            vel_ratio = r_7 / (r_30 + 1e-5)
-
             s_uplift = 0.0
             for ev in events:
                 if ev.start_date <= f_date <= ev.end_date:
@@ -307,20 +293,15 @@ class PredictionService:
                         s_uplift = float(ev.expected_uplift_pct or 60.0) / 100.0
                         is_seasonal_event_active = True
 
-            dist_orders = 5.0 if s_uplift > 0 else 2.0
-            is_promo = 1.0 if s_uplift > 0 else 0.0
+            feat_vec = FeatureEngineeringService.compute_step_features(
+                buf=rolling_buf,
+                forecast_date=f_date,
+                seasonal_uplift_pct=s_uplift,
+                unit_cost=unit_cost
+            )
 
-            x_vec = np.array([[
-                lag_1, lag_7, lag_14, lag_21,
-                r_7, r_std_7, r_14, r_30,
-                vel_ratio, dow, dom, month, is_weekend,
-                s_uplift, dist_orders, is_promo, unit_cost
-            ]], dtype=np.float32)
-
-            pred = float(model.predict(x_vec)[0])
-            if s_uplift > 0:
-                pred = pred * (1.0 + s_uplift)
-            pred = max(1.0, pred)
+            df_step = pd.DataFrame([feat_vec], columns=FEATURE_COLUMNS)
+            pred = max(1.0, float(model.predict(df_step)[0]))
 
             forecast_values.append(pred)
             rolling_buf.append(pred)
@@ -331,7 +312,7 @@ class PredictionService:
 
         surge_pct = round(((sensed_daily - baseline_30d) / max(1.0, baseline_30d)) * 100.0, 1)
         if is_seasonal_event_active and surge_pct < 25.0:
-            surge_pct = 60.0
+            surge_pct = 50.0
         surge_detected = surge_pct >= 25.0 or is_seasonal_event_active
 
         peak_idx = int(np.argmax(forecast_values))
@@ -370,11 +351,9 @@ class PredictionService:
             "total_forecast_demand": total_forecast_demand,
             "predicted_peak_units": int(round(peak_val)),
             "predicted_peak_date": f"Peak: {peak_date.strftime('%d %b')}",
-            "forecast_confidence_pct": 87,
-            "confidence_level_pct": 87.4,
             "trend_direction": "Increasing" if surge_pct > 0 else ("Decreasing" if surge_pct < -5 else "Stable"),
-            "trend_description": "Driven by flu season onset" if surge_detected else "Normal baseline consumption",
-            "primary_driver": "Seasonal Flu Uplift (+60%)" if surge_detected else "Baseline Dispensing Velocity",
+            "trend_description": "Driven by flu season onset" if surge_detected and is_seasonal_event_active else ("Upward demand trajectory" if surge_pct > 0 else "Normal baseline consumption"),
+            "primary_driver": "Seasonal Flu Uplift" if surge_detected and is_seasonal_event_active else "Baseline Dispensing Velocity",
             "surge_detected": surge_detected,
             "surge_pct": surge_pct,
             "chart_series": chart_series,
@@ -388,10 +367,9 @@ class PredictionService:
                 "forecast_demand_next_30d": f"{total_forecast_demand:,} units",
                 "predicted_peak_units": f"{int(round(peak_val))} units",
                 "predicted_peak_date": f"Peak: {peak_date.strftime('%d %b')}",
-                "forecast_confidence": "87.4%",
                 "trend": f"Upward (+{surge_pct}%)" if surge_pct > 0 else f"Steady ({surge_pct}%)",
-                "trend_description": "Driven by flu season onset" if surge_detected else "Normal baseline consumption",
-                "primary_driver": "Seasonal Flu Uplift (+60%)" if surge_detected else "Baseline Dispensing Velocity"
+                "trend_description": "Driven by flu season onset" if surge_detected and is_seasonal_event_active else ("Upward demand trajectory" if surge_pct > 0 else "Normal baseline consumption"),
+                "primary_driver": "Seasonal Flu Uplift" if surge_detected and is_seasonal_event_active else "Baseline Dispensing Velocity"
             }
         }
 

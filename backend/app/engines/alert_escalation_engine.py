@@ -114,6 +114,15 @@ class AlertEscalationEngine:
         all_alerts_res = await session.execute(select(Alert))
         alerts_by_node = {}
         for a in all_alerts_res.scalars().all():
+            if a.severity == "good":
+                if a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"]:
+                    a.severity = "critical"
+                elif a.alert_type in ["LOW_STOCK", "Low Stock"]:
+                    a.severity = "warning"
+                elif a.alert_type in ["EXPIRY_RISK", "Expiry Risk"]:
+                    a.severity = "warning"
+                else:
+                    a.severity = "medium"
             alerts_by_node.setdefault(f"{a.sku}_{a.warehouse_id}", []).append(a)
 
         all_batches_res = await session.execute(
@@ -170,7 +179,6 @@ class AlertEscalationEngine:
                 # Auto-resolve low-stock alert since it's now an absolute stockout
                 for la in lowstock_alerts:
                     la.status = "Resolved"
-                    la.severity = "good"
                     la.resolved_at = now
 
             # Condition 2: Critical Low Stock (< Safety Stock)
@@ -178,7 +186,6 @@ class AlertEscalationEngine:
                 # Auto-resolve stockout alert if stock is now > 0
                 for sa in stockout_alerts:
                     sa.status = "Resolved"
-                    sa.severity = "good"
                     sa.resolved_at = now
 
                 if not lowstock_alerts:
@@ -211,7 +218,6 @@ class AlertEscalationEngine:
                 # Auto-resolve stockout alert
                 for sa in stockout_alerts:
                     sa.status = "Resolved"
-                    sa.severity = "good"
                     sa.resolved_at = now
 
                 if not lowstock_alerts:
@@ -243,7 +249,6 @@ class AlertEscalationEngine:
             else:
                 for a in stockout_alerts + lowstock_alerts:
                     a.status = "Resolved"
-                    a.severity = "good"
                     a.resolved_at = now
                     a.detail = f"Resolved: Stock restored to {inv.current_stock:,} units ({inv.days_of_cover} days of cover)."
                     modified_alerts.append(a)
@@ -280,7 +285,6 @@ class AlertEscalationEngine:
                 # All batches healthy -> auto-resolve any active expiry alerts
                 for ea in expiry_alerts:
                     ea.status = "Resolved"
-                    ea.severity = "good"
                     ea.resolved_at = now
                     ea.detail = "Resolved: All active batches exceed 30-day expiry threshold."
                     modified_alerts.append(ea)
@@ -311,7 +315,6 @@ class AlertEscalationEngine:
             alert.status = "In Progress"
         elif act == "resolve":
             alert.status = "Resolved"
-            alert.severity = "good"
             alert.resolved_at = now
         elif act == "escalate":
             alert.escalation_level = min(3, alert.escalation_level + 1)

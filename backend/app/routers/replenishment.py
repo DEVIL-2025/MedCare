@@ -41,7 +41,8 @@ async def get_fefo_batches(
             Batch.sku == sku,
             Batch.quantity > 0,
             Batch.expiry_date > today,
-            Batch.is_quarantined == False
+            Batch.is_quarantined == False,
+            Batch.status.notin_(["EXPIRED", "QUARANTINED", "DEPLETED"])
         )
     )
     if warehouse_id and warehouse_id != "All":
@@ -182,12 +183,19 @@ async def get_replenishment_overview(
             "from": t.source_warehouse_id,
             "to": t.destination_warehouse_id,
             "quantity": t.quantity,
+            "batchId": t.batch_id,
+            "transferLeadTime": t.transfer_lead_time_days or 3,
             "cost": f"₹{round(getattr(t, 'estimated_transfer_cost_inr', t.quantity * 2.5) / 1000.0, 1)} K",
             "savings": f"₹{round(t.estimated_savings_inr / 100000.0, 2)} L",
             "reason": t.reason or "FEFO near-expiry transfer eliminates Tier-2 shortage",
+            "reasonWhat": f"Transfer {t.quantity:,} units of {p.name} ({t.sku}) from {t.source_warehouse_id} to {t.destination_warehouse_id}.",
+            "reasonWhy": t.reason or f"Source DC ({t.source_warehouse_id}) holds surplus stock with earlier expiry dates, whereas Destination DC ({t.destination_warehouse_id}) faces clinical stockout risk.",
+            "reasonWhen": f"Lead time is {t.transfer_lead_time_days or 3} days. Immediate dispatch recommended to prevent stockout and avoid batch expiration.",
+            "reasonImpact": f"Saves ₹{round(t.estimated_savings_inr / 100000.0, 2)} Lakhs by avoiding emergency supplier procurement and preventing near-expiry write-offs.",
             "status": t.status
         }
         for t, p in trf_records
+        if t.status in ["RECOMMENDED", "Recommended", "PENDING", "Pending"]
     ]
 
     # 3. Dynamic Top Suppliers Breakdown from DB
@@ -517,12 +525,12 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
 
     po_id = None
     # If decision type is TRANSFER, update transfer records
-    if rec.decision_type == "TRANSFER":
+    if rec.decision_type in ["TRANSFER", "TRANSFER_FIRST"]:
         trf_res = await db.execute(
             select(InventoryTransfer).where(
                 InventoryTransfer.sku == rec.sku,
                 InventoryTransfer.destination_warehouse_id == rec.warehouse_id,
-                InventoryTransfer.status == "RECOMMENDED"
+                InventoryTransfer.status.in_(["RECOMMENDED", "Recommended", "PENDING", "Pending"])
             )
         )
         trf = trf_res.scalars().first()
@@ -531,16 +539,19 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
     else:
         # Create PurchaseOrder
         po_id = f"PO-{int(datetime.now(timezone.utc).timestamp())}"
+        unit_c = round(rec.estimated_cost_inr / max(1, rec.recommended_quantity), 2)
         po = PurchaseOrder(
             id=po_id,
+            recommendation_id=rec.id,
             sku=rec.sku,
             warehouse_id=rec.warehouse_id,
             supplier_name=rec.preferred_source or "HealthGen Pharma",
             quantity=rec.recommended_quantity,
+            unit_cost_inr=unit_c,
             total_cost_inr=rec.estimated_cost_inr,
             order_date=today,
             eta_date=today + timedelta(days=5),
-            status="APPROVED",
+            status="Approved",
             created_at=now_utc
         )
         db.add(po)

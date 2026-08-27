@@ -45,11 +45,12 @@ class FeatureEngineeringService:
         for col in ["lag_1", "lag_7", "lag_14", "lag_21"]:
             df[col] = df[col].fillna(df["actual_demand"])
 
-        # Fast rolling statistics
-        df["rolling_mean_7d"] = df["lag_1"].rolling(7, min_periods=1).mean()
-        df["rolling_std_7d"] = df["lag_1"].rolling(7, min_periods=1).std().fillna(0)
-        df["rolling_mean_14d"] = df["lag_1"].rolling(14, min_periods=1).mean()
-        df["rolling_mean_30d"] = df["lag_1"].rolling(30, min_periods=1).mean()
+        # Group-isolated rolling statistics
+        grouped_lag = df.groupby(["sku", "warehouse_id"])["lag_1"]
+        df["rolling_mean_7d"] = grouped_lag.transform(lambda s: s.rolling(7, min_periods=1).mean())
+        df["rolling_std_7d"] = grouped_lag.transform(lambda s: s.rolling(7, min_periods=1).std()).fillna(0.0)
+        df["rolling_mean_14d"] = grouped_lag.transform(lambda s: s.rolling(14, min_periods=1).mean())
+        df["rolling_mean_30d"] = grouped_lag.transform(lambda s: s.rolling(30, min_periods=1).mean())
 
         # Velocity ratio
         df["velocity_ratio"] = (df["rolling_mean_7d"] / (df["rolling_mean_30d"] + 1e-5)).fillna(1.0)
@@ -61,6 +62,49 @@ class FeatureEngineeringService:
         df["is_weekend"] = df["day_of_week"].apply(lambda d: 1 if d >= 5 else 0)
 
         return df
+
+    @staticmethod
+    def compute_step_features(
+        buf: List[float],
+        forecast_date,
+        seasonal_uplift_pct: float,
+        unit_cost: float
+    ) -> List[float]:
+        """
+        Computes the exact 17-feature vector for a single multi-step rollout day,
+        maintaining exact parity with construct_features() definitions.
+        """
+        lag_1 = float(buf[-1])
+        lag_7 = float(buf[-7]) if len(buf) >= 7 else lag_1
+        lag_14 = float(buf[-14]) if len(buf) >= 14 else lag_1
+        lag_21 = float(buf[-21]) if len(buf) >= 21 else lag_1
+
+        win_7 = buf[-7:]
+        r_7 = float(np.mean(win_7))
+        r_std_7 = float(np.std(win_7, ddof=1)) if len(win_7) >= 2 else 0.0
+        if np.isnan(r_std_7):
+            r_std_7 = 0.0
+
+        r_14 = float(np.mean(buf[-14:]))
+        r_30 = float(np.mean(buf[-30:]))
+        vel_ratio = float(r_7 / (r_30 + 1e-5))
+
+        dow = float(forecast_date.weekday())
+        dom = float(forecast_date.day)
+        month = float(forecast_date.month)
+        is_weekend = 1.0 if dow >= 5.0 else 0.0
+
+        s_uplift = float(seasonal_uplift_pct)
+        dist_orders = 5.0 if s_uplift > 0.0 else 2.0
+        is_promo = 1.0 if s_uplift > 0.0 else 0.0
+        u_cost = float(unit_cost)
+
+        return [
+            lag_1, lag_7, lag_14, lag_21,
+            r_7, r_std_7, r_14, r_30,
+            vel_ratio, dow, dom, month, is_weekend,
+            s_uplift, dist_orders, is_promo, u_cost
+        ]
 
     @staticmethod
     def get_feature_matrix(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:

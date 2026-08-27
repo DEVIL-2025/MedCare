@@ -11,7 +11,7 @@ import { useControlTower } from '../context/ControlTowerContext';
 import { formatDateTime } from '../utils/dateUtils';
 
 const catTone = { critical: 'critical', warning: 'warning', medium: 'medium', info: 'info', good: 'good' };
-const catLabel = { critical: 'Critical', warning: 'High', medium: 'Medium', info: 'Info', good: 'Resolved' };
+const catLabel = { critical: 'Critical', warning: 'High', medium: 'Medium', info: 'Info', good: 'Low' };
 const statusTone = { New: 'critical', Acknowledged: 'medium', 'In Progress': 'warning', Resolved: 'good' };
 
 export default function Alerts() {

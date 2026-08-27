@@ -1,14 +1,17 @@
-from datetime import datetime, date, timezone
+import uuid
+from datetime import datetime, date, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 
 from backend.app.models.inventory import Inventory
 from backend.app.models.batch import Batch
 from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.transaction import InventoryTransaction
+from backend.app.engines.expiry_fefo_engine import ExpiryFEFOEngine
 from backend.app.config import settings
+from backend.app.utils.timezone import get_today_ist
 
 
 class InventoryEngine:
@@ -69,7 +72,8 @@ class InventoryEngine:
                 f"Invalid warehouse identifier '{warehouse_id}'. A specific, physical warehouse (e.g. MUM-01, DEL-02, PAT-01) must be selected."
             )
 
-        wh_res = await session.execute(select(Warehouse).where(Warehouse.id == warehouse_id.strip().upper()))
+        clean_wh_id = warehouse_id.strip().upper()
+        wh_res = await session.execute(select(Warehouse).where(Warehouse.id == clean_wh_id))
         warehouse = wh_res.scalars().first()
         if not warehouse:
             raise ValueError(
@@ -77,9 +81,8 @@ class InventoryEngine:
             )
         if not warehouse.is_active:
             raise ValueError(
-                f"Warehouse '{warehouse.name}' ({warehouse_id}) is decommissioned / inactive."
+                f"Warehouse '{warehouse.name}' ({clean_wh_id}) is decommissioned / inactive."
             )
-        clean_wh_id = warehouse.id
 
         # 3. Validate Product SKU
         clean_sku = sku.strip().upper() if sku else ""
@@ -88,7 +91,7 @@ class InventoryEngine:
         if not product:
             raise ValueError(f"Invalid SKU: '{sku}' does not exist in master catalog.")
         if not product.is_active:
-            raise ValueError(f"Product '{product.name}' ({sku}) is archived / inactive.")
+            raise ValueError(f"Product '{product.name}' ({clean_sku}) is archived / inactive.")
 
         # 4. Fetch or create Inventory record
         inv_res = await session.execute(
@@ -113,65 +116,87 @@ class InventoryEngine:
 
         prev_stock = inv.current_stock
         tx_type = transaction_type.upper()
+        today = get_today_ist()
+        allocated_batch_id = batch_id
 
         if tx_type in ["SALE", "CONSUMPTION", "TRANSFER_OUT"]:
             if inv.available_stock < quantity:
                 raise ValueError(
-                    f"Insufficient stock for {sku} in {warehouse_id}. Available: {inv.available_stock}, Requested: {quantity}"
+                    f"Insufficient stock for {clean_sku} in {clean_wh_id}. Available: {inv.available_stock}, Requested: {quantity}"
                 )
             new_stock = prev_stock - quantity
             inv.current_stock = new_stock
 
-            # Deduct from batches using FEFO
-            batches_res = await session.execute(
-                select(Batch).where(
-                    and_(
-                        Batch.sku == sku,
-                        Batch.warehouse_id == warehouse_id,
-                        Batch.status != "EXPIRED",
-                        Batch.quantity > 0
-                    )
-                ).order_by(Batch.expiry_date.asc())
-            )
-            available_batches = batches_res.scalars().all()
-            remaining_to_deduct = quantity
-
-            for b in available_batches:
-                if remaining_to_deduct <= 0:
-                    break
-                deduct = min(b.quantity, remaining_to_deduct)
-                b.quantity -= deduct
-                remaining_to_deduct -= deduct
+            if batch_id:
+                # Deduct from specific requested batch
+                b_res = await session.execute(
+                    select(Batch).where(and_(Batch.id == batch_id, Batch.warehouse_id == clean_wh_id, Batch.sku == clean_sku))
+                )
+                b = b_res.scalars().first()
+                if not b:
+                    raise ValueError(f"Batch '{batch_id}' not found for SKU {clean_sku} in warehouse {clean_wh_id}.")
+                if b.is_quarantined or b.status in ["EXPIRED", "QUARANTINED", "DEPLETED"] or b.expiry_date <= today:
+                    raise ValueError(f"Batch '{batch_id}' is expired or quarantined and cannot be allocated.")
+                if b.available_quantity < quantity:
+                    raise ValueError(f"Batch '{batch_id}' has insufficient available stock ({b.available_quantity} available, {quantity} requested).")
+                b.quantity -= quantity
                 if b.quantity == 0:
                     b.status = "DEPLETED"
+            else:
+                # Centralized FEFO allocation
+                allocations = await ExpiryFEFOEngine.allocate_fefo_batches(
+                    session=session,
+                    sku=clean_sku,
+                    warehouse_id=clean_wh_id,
+                    required_quantity=quantity
+                )
+                if not allocations:
+                    raise ValueError(f"No valid non-expired batches available to allocate for {clean_sku} in {clean_wh_id}.")
+                
+                for alloc in allocations:
+                    b = alloc["batch"]
+                    deduct = alloc["allocated_quantity"]
+                    b.quantity -= deduct
+                    if b.quantity == 0:
+                        b.status = "DEPLETED"
+
+                if len(allocations) == 1:
+                    allocated_batch_id = allocations[0]["batch_id"]
 
         elif tx_type in ["RECEIPT", "TRANSFER_IN"]:
             new_stock = prev_stock + quantity
             inv.current_stock = new_stock
 
             # Add to or create batch
-            today = date.today()
+            default_shelf_life = product.shelf_life_days if (product and product.shelf_life_days) else 730
             if batch_id:
+                dest_batch_id = f"{batch_id}-{clean_wh_id}"
                 b_res = await session.execute(
-                    select(Batch).where(and_(Batch.id == batch_id, Batch.warehouse_id == warehouse_id))
+                    select(Batch).where(
+                        and_(
+                            Batch.warehouse_id == clean_wh_id,
+                            or_(Batch.id == batch_id, Batch.id == dest_batch_id)
+                        )
+                    )
                 )
                 existing_b = b_res.scalars().first()
                 if existing_b:
                     existing_b.quantity += quantity
                     if existing_b.status in ["DEPLETED", "EXPIRED"]:
                         existing_b.status = "ACTIVE"
+                    allocated_batch_id = existing_b.id
                 else:
                     # Check if source batch exists to copy expiry_date / mfg_date
                     src_b_res = await session.execute(select(Batch).where(Batch.id == batch_id))
                     src_b = src_b_res.scalars().first()
-                    exp_date = src_b.expiry_date if src_b else today.replace(year=today.year + 2)
+                    exp_date = src_b.expiry_date if src_b else today + timedelta(days=default_shelf_life)
                     mfg_date = src_b.mfg_date if src_b else today
 
-                    dest_batch_id = f"{batch_id}-{warehouse_id}" if (src_b and src_b.warehouse_id != warehouse_id) else batch_id
+                    target_batch_id = dest_batch_id if (src_b and src_b.warehouse_id != clean_wh_id) else batch_id
                     new_b = Batch(
-                        id=dest_batch_id,
-                        sku=sku,
-                        warehouse_id=warehouse_id,
+                        id=target_batch_id,
+                        sku=clean_sku,
+                        warehouse_id=clean_wh_id,
                         quantity=quantity,
                         reserved_quantity=0,
                         mfg_date=mfg_date,
@@ -179,16 +204,19 @@ class InventoryEngine:
                         status="ACTIVE"
                     )
                     session.add(new_b)
+                    allocated_batch_id = target_batch_id
             else:
-                new_batch_id = f"BAT-{sku}-{warehouse_id}-{int(datetime.now(timezone.utc).timestamp())}"
+                uid_suffix = uuid.uuid4().hex[:6].upper()
+                new_batch_id = f"BAT-{clean_sku}-{clean_wh_id}-{int(datetime.now(timezone.utc).timestamp())}-{uid_suffix}"
+                allocated_batch_id = new_batch_id
                 new_b = Batch(
                     id=new_batch_id,
-                    sku=sku,
-                    warehouse_id=warehouse_id,
+                    sku=clean_sku,
+                    warehouse_id=clean_wh_id,
                     quantity=quantity,
                     reserved_quantity=0,
                     mfg_date=today,
-                    expiry_date=today.replace(year=today.year + 2),
+                    expiry_date=today + timedelta(days=default_shelf_life),
                     status="ACTIVE"
                 )
                 session.add(new_b)
@@ -212,9 +240,9 @@ class InventoryEngine:
         # Log transaction
         tx = InventoryTransaction(
             transaction_type=tx_type,
-            sku=sku,
-            warehouse_id=warehouse_id,
-            batch_id=batch_id,
+            sku=clean_sku,
+            warehouse_id=clean_wh_id,
+            batch_id=allocated_batch_id,
             quantity=quantity if tx_type in ["RECEIPT", "TRANSFER_IN", "ADJUSTMENT"] else -quantity,
             previous_stock=prev_stock,
             new_stock=new_stock,

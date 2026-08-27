@@ -241,13 +241,7 @@ export default function Reports() {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-[16px] font-bold text-ink-900">Supply Chain Analytics & Financial ROI Audit</h2>
-            {data?.formatted_server_time && (
-              <span className="text-[10.5px] px-2 py-0.5 rounded bg-cream-200 text-ink-600 font-mono">
-                {data.formatted_server_time}
-              </span>
-            )}
           </div>
-          <p className="text-[12px] text-ink-500">Live Database valuation trends, FEFO batch aging distributions, and before-vs-after ROI metrics.</p>
         </div>
         <button
           onClick={exportReportCSV}

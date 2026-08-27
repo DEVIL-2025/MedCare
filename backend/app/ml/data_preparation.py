@@ -30,8 +30,6 @@ class DataPreparationService:
         df_demand = pd.DataFrame(rows, columns=["date", "sku", "warehouse_id", "actual_demand"])
         df_demand["date"] = pd.to_datetime(df_demand["date"])
         df_demand["actual_demand"] = df_demand["actual_demand"].astype(float)
-        df_demand["distributor_orders_count"] = 0
-        df_demand["is_promotional"] = 0
 
         # Master maps
         prod_res = await session.execute(select(Product.sku, Product.category, Product.criticality, Product.unit_cost))
@@ -58,4 +56,7 @@ class DataPreparationService:
             uplift_series[mask] = (ev.expected_uplift_pct or 60.0) / 100.0
 
         df_demand["seasonal_uplift_pct"] = uplift_series
+        df_demand["distributor_orders_count"] = np.where(df_demand["seasonal_uplift_pct"] > 0, 5.0, 2.0)
+        df_demand["is_promotional"] = np.where(df_demand["seasonal_uplift_pct"] > 0, 1.0, 0.0)
+
         return df_demand
