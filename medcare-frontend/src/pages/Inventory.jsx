@@ -386,7 +386,7 @@ export default function Inventory() {
         <StatCard
           label="Total Inventory Units"
           value={totalUnits.toLocaleString()}
-          subtext={`Across ${selectedWarehouse === 'All' ? '8 Active DCs' : selectedWarehouse}`}
+          subtext={`Across ${warehouses.length} Active DCs`}
           icon={Boxes}
           tone="neutral"
           onClick={() => setQuickFilter('all')}
