@@ -23,53 +23,55 @@ export default function Topbar({ title, subtitle }) {
   const warehouseLabel = selectedWarehouse === 'All' ? 'All Warehouses' : `${selectedWhObj?.name || selectedWarehouse} (${selectedWarehouse})`;
 
   return (
-    <header className="flex items-center justify-between px-6 py-3.5 bg-white border-b border-ink-100 relative z-30">
+    <header className="flex items-center justify-between px-6 py-3.5 bg-white border-b border-emerald-500/20 shadow-xs relative z-30">
       <div>
-        <h1 className="text-2xl font-semibold text-ink-900 tracking-tight">{title}</h1>
-        <p className="text-[13px] text-ink-500">{subtitle}</p>
+        <h1 className="text-2xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
+          {title}
+        </h1>
+        <p className="text-[13px] text-gray-500 font-medium">{subtitle}</p>
       </div>
       <div className="flex items-center gap-2.5">
         {/* Live IST System Clock */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-md bg-cream-100 border border-ink-100 text-[12px] font-mono text-ink-700 shadow-sm" title="Live Asia/Kolkata (IST, UTC+05:30) Current Time">
-          <Clock size={13} className="text-forest-700 animate-pulse" />
-          <span className="font-semibold text-ink-800">{dateString}</span>
-          <span className="text-ink-300">|</span>
-          <span className="text-forest-800 font-bold">{timeString}</span>
+        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50/60 border border-emerald-200/80 text-[12px] font-mono text-gray-800 shadow-xs" title="Live Asia/Kolkata (IST, UTC+05:30) Current Time">
+          <Clock size={14} className="text-emerald-700 animate-pulse" />
+          <span className="font-semibold text-gray-900">{dateString}</span>
+          <span className="text-gray-300">|</span>
+          <span className="text-emerald-800 font-bold">{timeString}</span>
         </div>
         {/* Dynamic Warehouse Selector Dropdown */}
         <div className="relative">
           <button
             onClick={() => setWhDropdownOpen(!whDropdownOpen)}
-            className="flex items-center gap-1.5 text-[12.5px] border border-ink-200 rounded-md px-3 py-1.5 text-ink-800 font-medium hover:bg-cream-200 transition-colors cursor-pointer bg-cream-100/60"
+            className="flex items-center gap-1.5 text-[12.5px] border border-gray-200 rounded-lg px-3 py-1.5 text-gray-900 font-semibold hover:bg-emerald-50/50 hover:border-emerald-300 transition-colors cursor-pointer bg-white shadow-xs"
           >
-            <Building2 size={14} className="text-forest-700" />
+            <Building2 size={14} className="text-emerald-700" />
             <span>{warehouseLabel}</span>
-            <ChevronDown size={13} className="text-ink-500 ml-0.5" />
+            <ChevronDown size={13} className="text-gray-500 ml-0.5" />
           </button>
 
           {whDropdownOpen && (
-            <div className="absolute left-0 sm:right-0 sm:left-auto mt-2 w-64 bg-white border border-ink-100 rounded-md shadow-xl py-1 z-50 text-[12px] max-h-72 overflow-y-auto">
-              <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-400 border-b border-ink-100 bg-cream-100">
+            <div className="absolute left-0 sm:right-0 sm:left-auto mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-50 text-[12px] max-h-72 overflow-y-auto">
+              <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100 bg-gray-50">
                 Filter Network Scope
               </div>
               <button
                 onClick={() => { setSelectedWarehouse('All'); setWhDropdownOpen(false); }}
-                className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-cream-200 cursor-pointer ${selectedWarehouse === 'All' ? 'bg-forest-50 text-forest-800 font-bold' : 'text-ink-700'}`}
+                className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-emerald-50/60 cursor-pointer ${selectedWarehouse === 'All' ? 'bg-emerald-50 text-emerald-900 font-bold' : 'text-gray-700'}`}
               >
                 <span>🌐 All Warehouses (Aggregated Rollup)</span>
-                {selectedWarehouse === 'All' && <Check size={14} className="text-forest-700" />}
+                {selectedWarehouse === 'All' && <Check size={14} className="text-emerald-700" />}
               </button>
               {warehouses.map((w) => (
                 <button
                   key={w.id}
                   onClick={() => { setSelectedWarehouse(w.id); setWhDropdownOpen(false); }}
-                  className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-cream-200 cursor-pointer ${selectedWarehouse === w.id ? 'bg-forest-50 text-forest-800 font-bold' : 'text-ink-700'}`}
+                  className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-emerald-50/60 cursor-pointer ${selectedWarehouse === w.id ? 'bg-emerald-50 text-emerald-900 font-bold' : 'text-gray-700'}`}
                 >
                   <div>
                     <div className="font-semibold">{w.name}</div>
-                    <div className="text-[10px] text-ink-400 font-mono">{w.id} • {w.region || 'Regional DC'}</div>
+                    <div className="text-[10px] text-gray-400 font-mono">{w.id} • {w.region || 'Regional DC'}</div>
                   </div>
-                  {selectedWarehouse === w.id && <Check size={14} className="text-forest-700" />}
+                  {selectedWarehouse === w.id && <Check size={14} className="text-emerald-700" />}
                 </button>
               ))}
             </div>
@@ -78,19 +80,19 @@ export default function Topbar({ title, subtitle }) {
 
         <button
           onClick={triggerRefresh}
-          className="p-1.5 rounded-md border border-ink-100 text-ink-500 hover:bg-cream-200 cursor-pointer transition-colors"
+          className="p-2 rounded-lg border border-gray-200 text-gray-600 hover:text-emerald-700 hover:bg-emerald-50/60 hover:border-emerald-300 cursor-pointer transition-colors"
           title="Refresh Real-Time Data"
         >
           <RefreshCw size={15} />
         </button>
         <button
           onClick={() => navigate('/alerts')}
-          className="relative p-1.5 rounded-md border border-ink-100 text-ink-500 hover:bg-cream-200 cursor-pointer transition-colors"
+          className="relative p-2 rounded-lg border border-gray-200 text-gray-600 hover:text-emerald-700 hover:bg-emerald-50/60 hover:border-emerald-300 cursor-pointer transition-colors"
           title="System Alerts"
         >
           <Bell size={15} />
           {activeAlertCount > 0 && (
-            <span className="absolute -top-1 -right-1 px-1 min-w-3.5 h-3.5 text-[9px] flex items-center justify-center bg-brick-600 text-white font-bold rounded-full animate-pulse">
+            <span className="absolute -top-1 -right-1 px-1.5 min-w-4 h-4 text-[9.5px] flex items-center justify-center bg-brick-600 text-white font-extrabold rounded-full shadow-xs animate-pulse">
               {activeAlertCount}
             </span>
           )}
@@ -100,24 +102,27 @@ export default function Topbar({ title, subtitle }) {
         <div className="relative">
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-2 pl-2.5 border-l border-ink-100 hover:opacity-85 transition-opacity cursor-pointer"
+            className="flex items-center gap-2.5 pl-3 border-l border-gray-200 hover:opacity-90 transition-all cursor-pointer group"
           >
-            <div className={`w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-bold ${
-              user?.role === 'ADMIN' ? 'bg-brick-600' : 'bg-forest-700'
-            }`}>
-              {user?.avatar || 'U'}
+            {/* Elegant Medical Executive Badge */}
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-700 via-emerald-800 to-forest-900 text-white flex items-center justify-center shadow-xs border border-emerald-600/30 group-hover:border-emerald-500/60 transition-colors">
+              {user?.role === 'ADMIN' ? (
+                <ShieldCheck size={16} className="text-emerald-300" />
+              ) : (
+                <UserCheck size={16} className="text-emerald-300" />
+              )}
             </div>
             <div className="text-[12.5px] leading-tight text-left">
-              <div className="text-ink-900 font-semibold">{user?.name || user?.full_name || 'SCM User'}</div>
-              <div className="flex items-center gap-1 text-[10.5px]">
-                <span className={`font-semibold ${user?.role === 'ADMIN' ? 'text-brick-700 font-bold' : 'text-forest-700'}`}>
-                  {user?.role || 'MANAGER'}
+              <div className="text-gray-900 font-bold tracking-tight">{user?.name || user?.full_name || 'System Administrator'}</div>
+              <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
+                <span className="font-bold text-emerald-800 bg-emerald-100 border border-emerald-300/80 px-1.5 py-0.2 rounded text-[10px] tracking-wide font-mono">
+                  {user?.role || 'ADMIN'}
                 </span>
-                <span className="text-ink-400">•</span>
-                <span className="text-ink-500">{user?.roleLabel || (user?.role === 'ADMIN' ? 'Administrator' : 'Manager')}</span>
+                <span className="text-gray-400">•</span>
+                <span className="text-gray-600 font-medium">{user?.roleLabel || (user?.role === 'ADMIN' ? 'Control Tower Lead' : 'Supply Chain Manager')}</span>
               </div>
             </div>
-            <ChevronDown size={12} className="text-ink-400" />
+            <ChevronDown size={13} className="text-gray-400 ml-0.5 group-hover:text-gray-700 group-hover:translate-y-0.5 transition-all" />
           </button>
 
           {dropdownOpen && (

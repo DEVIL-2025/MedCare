@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
@@ -44,7 +44,7 @@ class ExpiryFEFOEngine:
         Selects batches in strict FEFO order, skipping expired or quarantined batches.
         """
         clean_sku = sku.strip().upper() if sku else ""
-        clean_wh_id = warehouse_id.strip().upper() if warehouse_id else ""
+        clean_wh_id = warehouse_id.strip() if warehouse_id else ""
         today = get_today_ist()
 
         batches_res = await session.execute(
@@ -112,31 +112,34 @@ class ExpiryFEFOEngine:
         expiry_risk_units = 0
 
         for batch, prod in records:
-            age_days = max(0, (today - batch.mfg_date).days)
-            batch_val = batch.quantity * prod.unit_cost
+            mfg_date = batch.mfg_date or batch.expiry_date or today
+            age_days = max(0, (today - mfg_date).days)
+            unit_cost = float(getattr(prod, "unit_cost", 0.0) or 0.0)
+            batch_qty = int(batch.quantity or 0)
+            batch_val = batch_qty * unit_cost
             total_val += batch_val
 
-            days_to_exp = (batch.expiry_date - today).days
+            days_to_exp = (batch.expiry_date - today).days if batch.expiry_date else 999
             if days_to_exp <= 0:
                 expired_val += batch_val
             elif days_to_exp <= settings.EXPIRY_AT_RISK_DAYS:
                 at_risk_val += batch_val
-                expiry_risk_units += batch.quantity
+                expiry_risk_units += batch_qty
 
             if age_days <= 30:
-                buckets["0-30"]["units"] += batch.quantity
+                buckets["0-30"]["units"] += batch_qty
                 buckets["0-30"]["value"] += batch_val
             elif age_days <= 60:
-                buckets["31-60"]["units"] += batch.quantity
+                buckets["31-60"]["units"] += batch_qty
                 buckets["31-60"]["value"] += batch_val
             elif age_days <= 90:
-                buckets["61-90"]["units"] += batch.quantity
+                buckets["61-90"]["units"] += batch_qty
                 buckets["61-90"]["value"] += batch_val
             elif age_days <= 180:
-                buckets["91-180"]["units"] += batch.quantity
+                buckets["91-180"]["units"] += batch_qty
                 buckets["91-180"]["value"] += batch_val
             else:
-                buckets["180+"]["units"] += batch.quantity
+                buckets["180+"]["units"] += batch_qty
                 buckets["180+"]["value"] += batch_val
 
         summary_list = []

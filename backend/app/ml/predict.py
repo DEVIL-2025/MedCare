@@ -1,18 +1,18 @@
 import os
-import time
 import warnings
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import date, timedelta
-from typing import Dict, Any, List, Optional
+from datetime import timedelta
+from typing import Dict, Any, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.ml.train import MODEL_FILE, ModelTrainingService
 from backend.app.ml.feature_engineering import FEATURE_COLUMNS, FeatureEngineeringService
 from backend.app.models.demand import DemandHistory, SeasonalEvent
 from backend.app.models.product import Product
-from backend.app.utils.timezone import get_today_ist, get_now_ist, format_ist_date, format_ist_datetime
+from backend.app.config import settings
+from backend.app.utils.timezone import get_today_ist
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -46,11 +46,11 @@ class PredictionService:
     async def predict_all_demands(
         cls,
         session: AsyncSession,
-        horizon_days: int = 30
+        horizon_days: int = settings.FORECAST_HORIZON_DAYS
     ) -> Dict[str, Dict[str, Any]]:
         """
         Matrix-vectorized bulk ML demand forecasting querying live PostgreSQL database.
-        Predicts all SKU-DCs concurrently across each forecast horizon step in just 30 vector calls.
+        Predicts all SKU-DCs concurrently across each forecast horizon step in vectorized calls.
         """
         model, metadata = await cls.get_or_load_model(session)
         today = get_today_ist()
@@ -64,7 +64,7 @@ class PredictionService:
         history_map: Dict[str, List[float]] = {}
         for r in all_dh:
             k = f"{r.sku}_{r.warehouse_id}"
-            history_map.setdefault(k, []).append(float(r.actual_sales))
+            history_map.setdefault(k, []).append(float(r.actual_sales or 0.0))
 
         prods_res = await session.execute(select(Product).where(Product.is_active != False))
         products_map = {p.sku: p for p in prods_res.scalars().all()}
@@ -90,8 +90,8 @@ class PredictionService:
         for k in keys:
             sku, _ = k.split("_", 1)
             p = products_map.get(sku)
-            unit_costs.append(float(p.unit_cost) if p else 50.0)
-            categories.append(p.category if p else "Analgesics")
+            unit_costs.append(float(getattr(p, "unit_cost", 50.0) or 50.0))
+            categories.append(getattr(p, "category", "General") or "General")
 
         # 2. Vectorized multi-step rollout: 1 matrix predict call per forecast day
         for d_idx, f_date in enumerate(forecast_dates):
@@ -103,10 +103,11 @@ class PredictionService:
 
                 s_uplift = 0.0
                 for ev in events:
-                    if ev.start_date <= f_date <= ev.end_date:
-                        ev_cats = (ev.impacted_categories or "All").split(",")
+                    if ev.start_date and ev.end_date and ev.start_date <= f_date <= ev.end_date:
+                        ev_cats = [c.strip() for c in (ev.impacted_categories or "All").split(",")]
                         if cat in ev_cats or "All" in ev_cats:
-                            s_uplift = float(ev.expected_uplift_pct or 60.0) / 100.0
+                            uplift_val = float(ev.expected_uplift_pct if ev.expected_uplift_pct is not None else settings.FLU_SEASON_UPLIFT_PCT)
+                            s_uplift = uplift_val / 100.0
                             seasonal_flags[i] = True
 
                 feat_vec = FeatureEngineeringService.compute_step_features(
@@ -213,7 +214,7 @@ class PredictionService:
         session: AsyncSession,
         sku: str,
         warehouse_id: str,
-        horizon_days: int = 30
+        horizon_days: int = settings.FORECAST_HORIZON_DAYS
     ) -> Dict[str, Any]:
         """
         Executes ML demand forecasting on the specified SKU-DC across the specified horizon.
@@ -234,7 +235,7 @@ class PredictionService:
             .order_by(DemandHistory.date.asc())
         )
         dh_rows = dh_res.scalars().all()
-        actual_series = [float(r.actual_sales) for r in dh_rows]
+        actual_series = [float(r.actual_sales or 0.0) for r in dh_rows]
 
         if not actual_series:
             return {
@@ -271,8 +272,8 @@ class PredictionService:
 
         prod_res = await session.execute(select(Product).where(Product.sku == sku))
         prod = prod_res.scalars().first()
-        unit_cost = float(prod.unit_cost) if prod else 50.0
-        category = prod.category if prod else "Analgesics"
+        unit_cost = float(getattr(prod, "unit_cost", 50.0) or 50.0)
+        category = getattr(prod, "category", "General") or "General"
 
         events_res = await session.execute(select(SeasonalEvent))
         events = events_res.scalars().all()
@@ -287,10 +288,11 @@ class PredictionService:
         for f_date in forecast_dates:
             s_uplift = 0.0
             for ev in events:
-                if ev.start_date <= f_date <= ev.end_date:
-                    ev_cats = (ev.impacted_categories or "All").split(",")
+                if ev.start_date and ev.end_date and ev.start_date <= f_date <= ev.end_date:
+                    ev_cats = [c.strip() for c in (ev.impacted_categories or "All").split(",")]
                     if category in ev_cats or "All" in ev_cats:
-                        s_uplift = float(ev.expected_uplift_pct or 60.0) / 100.0
+                        uplift_val = float(ev.expected_uplift_pct if ev.expected_uplift_pct is not None else settings.FLU_SEASON_UPLIFT_PCT)
+                        s_uplift = uplift_val / 100.0
                         is_seasonal_event_active = True
 
             feat_vec = FeatureEngineeringService.compute_step_features(

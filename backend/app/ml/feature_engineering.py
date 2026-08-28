@@ -74,20 +74,25 @@ class FeatureEngineeringService:
         Computes the exact 17-feature vector for a single multi-step rollout day,
         maintaining exact parity with construct_features() definitions.
         """
+        if not buf:
+            buf = [0.0]
+
         lag_1 = float(buf[-1])
         lag_7 = float(buf[-7]) if len(buf) >= 7 else lag_1
         lag_14 = float(buf[-14]) if len(buf) >= 14 else lag_1
         lag_21 = float(buf[-21]) if len(buf) >= 21 else lag_1
 
-        win_7 = buf[-7:]
-        r_7 = float(np.mean(win_7))
+        win_7 = buf[-7:] if len(buf) >= 7 else buf
+        r_7 = float(np.mean(win_7)) if len(win_7) > 0 else lag_1
         r_std_7 = float(np.std(win_7, ddof=1)) if len(win_7) >= 2 else 0.0
         if np.isnan(r_std_7):
             r_std_7 = 0.0
 
-        r_14 = float(np.mean(buf[-14:]))
-        r_30 = float(np.mean(buf[-30:]))
+        r_14 = float(np.mean(buf[-14:])) if buf else lag_1
+        r_30 = float(np.mean(buf[-30:])) if buf else lag_1
         vel_ratio = float(r_7 / (r_30 + 1e-5))
+        if np.isnan(vel_ratio) or np.isinf(vel_ratio):
+            vel_ratio = 1.0
 
         dow = float(forecast_date.weekday())
         dom = float(forecast_date.day)

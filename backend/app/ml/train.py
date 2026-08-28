@@ -1,9 +1,8 @@
 import os
 import joblib
 from datetime import datetime, timezone
-import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor
 from backend.app.ml.data_preparation import DataPreparationService
 from backend.app.ml.feature_engineering import FeatureEngineeringService, FEATURE_COLUMNS
 from backend.app.ml.evaluate import ModelEvaluator
@@ -73,11 +72,13 @@ class ModelTrainingService:
             }
         }
 
-        # 7. Persist to Disk
+        # 7. Atomic Persist to Disk
         artifact = {
             "model": model,
             "metadata": metadata
         }
-        joblib.dump(artifact, MODEL_FILE)
+        temp_file = f"{MODEL_FILE}.tmp"
+        joblib.dump(artifact, temp_file)
+        os.replace(temp_file, MODEL_FILE)
 
         return metadata

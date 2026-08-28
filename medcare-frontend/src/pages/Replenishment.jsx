@@ -44,6 +44,8 @@ export default function Replenishment() {
   const [loadingExplorer, setLoadingExplorer] = useState(false);
   const [products, setProducts] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [selectedSupplier, setSelectedSupplier] = useState('');
   const [actionSuccess, setActionSuccess] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [actionProcessing, setActionProcessing] = useState(false);
@@ -57,14 +59,17 @@ export default function Replenishment() {
   useEffect(() => {
     async function loadMeta() {
       try {
-        const [prods, whs] = await Promise.all([
+        const [prods, whs, supps] = await Promise.all([
           api.getProducts(),
-          api.getWarehouses()
+          api.getWarehouses(),
+          api.getSuppliers({ active_only: true })
         ]);
         const prodList = Array.isArray(prods) ? prods : [];
         setProducts(prodList);
         const whList = Array.isArray(whs) ? whs : (whs?.overview || []);
         setWarehouses(whList);
+        const suppList = Array.isArray(supps) ? supps : [];
+        setSuppliers(suppList);
         if (prodList.length > 0 && (!fefoExplorerSku || !prodList.some(p => p.sku === fefoExplorerSku))) {
           setFefoExplorerSku(prodList[0].sku);
         }
@@ -164,11 +169,23 @@ export default function Replenishment() {
     }
   }, [tab, loadExplorerBatches, refreshKey]);
 
-  async function handleApprove(id) {
+  useEffect(() => {
+    if (reviewItem) {
+      setSelectedSupplier(reviewItem.supplier || (suppliers[0]?.name || ''));
+    }
+  }, [reviewItem, suppliers]);
+
+  async function handleApprove(id, customSupplier = null) {
     setActionProcessing(true);
     setActionError(null);
     try {
-      const res = await api.approveRecommendation(id);
+      const payload = {};
+      if (customSupplier || selectedSupplier) {
+        payload.supplier_name = customSupplier || selectedSupplier;
+      }
+      const res = await api.approveRecommendation(id, {
+        body: JSON.stringify(payload)
+      });
       setActionSuccess(res.message || `Recommendation ${id} approved! PO / Transfer scheduled in Database.`);
       setReviewItem(null);
       triggerRefresh();
@@ -230,6 +247,7 @@ export default function Replenishment() {
   }
 
   const recommendations = data?.recommendations || [];
+  const inbound_monitoring = data?.inbound_monitoring || [];
   const transfer_opportunities = data?.transfer_opportunities || [];
   const top_suppliers = data?.top_suppliers || [];
   const replenishment_by_category = data?.replenishment_by_category || [];
@@ -367,9 +385,19 @@ export default function Replenishment() {
                             {Number(rec.recommendedQty !== undefined ? rec.recommendedQty : Math.max(0, (rec.forecastDemand || 0) - (rec.currentStock || 0))).toLocaleString()}
                           </td>
                           <td className="py-2.5 px-3">
-                            <span className="text-[11px] px-2 py-0.5 rounded bg-cream-200 text-ink-800 font-medium">
-                              {rec.decisionType === 'TRANSFER' || rec.decisionType === 'TRANSFER_FIRST' ? 'FEFO Transfer' : 'Procurement PO'}
-                            </span>
+                            {rec.decisionType === 'TRANSFER' || rec.decisionType === 'TRANSFER_FIRST' ? (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-cream-200 text-ink-800 font-medium">
+                                FEFO Transfer
+                              </span>
+                            ) : rec.decisionType === 'INBOUND_MONITORING' ? (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-medium border border-amber-300">
+                                Inbound Monitoring
+                              </span>
+                            ) : (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-cream-200 text-ink-800 font-medium">
+                                Procurement PO
+                              </span>
+                            )}
                           </td>
                           <td className="py-2.5 px-3 text-right">
                             {rec.status === 'APPROVED' ? (
@@ -382,15 +410,17 @@ export default function Replenishment() {
                                   onClick={() => setReviewItem(rec)}
                                   className="px-2 py-1 text-[11px] border border-ink-200 rounded hover:bg-cream-200 font-medium cursor-pointer"
                                 >
-                                  Review Why
+                                  {rec.decisionType === 'INBOUND_MONITORING' ? 'View Details' : 'Review Why'}
                                 </button>
-                                <button
-                                  onClick={() => handleApprove(rec.id)}
-                                  disabled={actionProcessing}
-                                  className="px-2.5 py-1 text-[11px] bg-forest-700 hover:bg-forest-600 text-white rounded font-medium shadow-xs cursor-pointer disabled:opacity-50"
-                                >
-                                  Approve
-                                </button>
+                                {rec.decisionType !== 'INBOUND_MONITORING' && (
+                                  <button
+                                    onClick={() => handleApprove(rec.id)}
+                                    disabled={actionProcessing}
+                                    className="px-2.5 py-1 text-[11px] bg-forest-700 hover:bg-forest-600 text-white rounded font-medium shadow-xs cursor-pointer disabled:opacity-50"
+                                  >
+                                    Approve
+                                  </button>
+                                )}
                               </div>
                             )}
                           </td>
@@ -650,61 +680,64 @@ export default function Replenishment() {
 
       {/* Section 4: Purchase Orders */}
       {tab === 'Purchase Orders' && (
-        <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
-            <div>
-              <h3 className="text-[15px] font-semibold text-ink-900">Supplier Purchase Orders</h3>
-              <p className="text-[11.5px] text-ink-500">Live procurement orders issued to pharmaceutical manufacturers & suppliers.</p>
+        <div className="space-y-6">
+          {/* Supplier Purchase Orders Table */}
+          <div className="bg-white rounded-lg border border-ink-100 shadow-card p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
+              <div>
+                <h3 className="text-[15px] font-semibold text-ink-900">Supplier Purchase Orders</h3>
+                <p className="text-[11.5px] text-ink-500">Live procurement orders issued to pharmaceutical manufacturers & suppliers.</p>
+              </div>
+              <div className="relative max-w-xs w-full">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+                <input
+                  type="text"
+                  placeholder="Search purchase orders..."
+                  value={poSearch}
+                  onChange={(e) => setPoSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded border border-ink-200 focus:outline-none focus:border-forest-600 bg-cream-100/50"
+                />
+              </div>
             </div>
-            <div className="relative max-w-xs w-full">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-              <input
-                type="text"
-                placeholder="Search purchase orders..."
-                value={poSearch}
-                onChange={(e) => setPoSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded border border-ink-200 focus:outline-none focus:border-forest-600 bg-cream-100/50"
-              />
-            </div>
-          </div>
 
-          {filteredPurchaseOrders.length === 0 ? (
-            <EmptyState
-              title={purchase_orders.length === 0 ? "No Purchase Orders" : "No Matching Purchase Orders"}
-              description={purchase_orders.length === 0 ? "Approved replenishment orders will generate supplier POs." : "Try adjusting your search criteria."}
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[12.5px]">
-                <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
-                  <tr>
-                    <th className="py-2.5 px-3">PO Number</th>
-                    <th className="py-2.5 px-3">Supplier</th>
-                    <th className="py-2.5 px-3">SKU & Warehouse</th>
-                    <th className="py-2.5 px-3">Quantity</th>
-                    <th className="py-2.5 px-3">Total Value</th>
-                    <th className="py-2.5 px-3">Order Date</th>
-                    <th className="py-2.5 px-3 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {filteredPurchaseOrders.map((po) => (
-                    <tr key={po.id} className="hover:bg-cream-100/60 transition-colors">
-                      <td className="py-2.5 px-3 font-mono font-medium text-forest-700">{po.id}</td>
-                      <td className="py-2.5 px-3 font-semibold text-ink-900">{po.supplier}</td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-ink-600">{po.sku} @ {po.warehouse}</td>
-                      <td className="py-2.5 px-3 font-bold text-ink-800">{po.quantity?.toLocaleString()}</td>
-                      <td className="py-2.5 px-3 font-semibold text-ink-900">{po.value}</td>
-                      <td className="py-2.5 px-3 text-ink-500">{formatDate(po.date || po.order_date || po.orderDate || po.created_at) || po.date || 'Recent'}</td>
-                      <td className="py-2.5 px-3 text-right">
-                        <Badge tone={poStatusTone[po.status] || 'neutral'}>{po.status}</Badge>
-                      </td>
+            {filteredPurchaseOrders.length === 0 ? (
+              <EmptyState
+                title={purchase_orders.length === 0 ? "No Purchase Orders" : "No Matching Purchase Orders"}
+                description={purchase_orders.length === 0 ? "Approved replenishment orders will generate supplier POs." : "Try adjusting your search criteria."}
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[12.5px]">
+                  <thead className="bg-cream-200/60 text-ink-500 font-semibold border-b border-ink-100">
+                    <tr>
+                      <th className="py-2.5 px-3">PO Number</th>
+                      <th className="py-2.5 px-3">Supplier</th>
+                      <th className="py-2.5 px-3">SKU & Warehouse</th>
+                      <th className="py-2.5 px-3">Quantity</th>
+                      <th className="py-2.5 px-3">Total Value</th>
+                      <th className="py-2.5 px-3">Order Date</th>
+                      <th className="py-2.5 px-3 text-right">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {filteredPurchaseOrders.map((po) => (
+                      <tr key={po.id} className="hover:bg-cream-100/60 transition-colors">
+                        <td className="py-2.5 px-3 font-mono font-medium text-forest-700">{po.id}</td>
+                        <td className="py-2.5 px-3 font-semibold text-ink-900">{po.supplier}</td>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-ink-600">{po.sku} @ {po.warehouse}</td>
+                        <td className="py-2.5 px-3 font-bold text-ink-800">{po.quantity?.toLocaleString()}</td>
+                        <td className="py-2.5 px-3 font-semibold text-ink-900">{po.value}</td>
+                        <td className="py-2.5 px-3 text-ink-500">{formatDate(po.date || po.order_date || po.orderDate || po.created_at) || po.date || 'Recent'}</td>
+                        <td className="py-2.5 px-3 text-right">
+                          <Badge tone={poStatusTone[po.status] || 'neutral'}>{po.status}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -731,6 +764,26 @@ export default function Replenishment() {
                 <span className="text-ink-500">Decision Policy:</span>
                 <span className="font-semibold text-ink-900">{reviewItem.decisionType}</span>
               </div>
+              {reviewItem.decisionType !== 'TRANSFER' && reviewItem.decisionType !== 'TRANSFER_FIRST' && reviewItem.decisionType !== 'INBOUND_MONITORING' && (
+                <div className="flex items-center justify-between pt-1 border-t border-ink-100/60">
+                  <span className="text-ink-700 font-semibold">Select Supplier:</span>
+                  <select
+                    value={selectedSupplier}
+                    onChange={(e) => setSelectedSupplier(e.target.value)}
+                    className="px-2 py-1 text-[12px] rounded border border-ink-300 bg-white font-medium text-ink-900 focus:outline-none focus:border-forest-600 max-w-[220px]"
+                  >
+                    {suppliers.length > 0 ? (
+                      suppliers.map((s) => (
+                        <option key={s.id} value={s.name}>
+                          {s.name} ({s.lead_time_days}d lead)
+                        </option>
+                      ))
+                    ) : (
+                      <option value={reviewItem.supplier}>{reviewItem.supplier}</option>
+                    )}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 border-t border-ink-100 pt-3 text-[12px]">
@@ -798,20 +851,37 @@ export default function Replenishment() {
               >
                 Close
               </button>
-              <button
-                onClick={() => handleReject(reviewItem.id)}
-                disabled={actionProcessing}
-                className="px-3 py-1.5 text-[12px] border border-brick-600/30 text-brick-700 bg-brick-50 hover:bg-brick-100 rounded font-medium cursor-pointer disabled:opacity-50"
-              >
-                Reject
-              </button>
-              <button
-                onClick={() => handleApprove(reviewItem.id)}
-                disabled={actionProcessing}
-                className="px-3.5 py-1.5 text-[12px] bg-forest-700 hover:bg-forest-600 text-white rounded font-medium shadow-xs cursor-pointer disabled:opacity-50"
-              >
-                Approve & Execute
-              </button>
+              {reviewItem.decisionType === 'INBOUND_MONITORING' ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-amber-700 font-medium bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded">
+                    ⚠ Inbound in transit — no new PO needed. Dismiss once delivered.
+                  </span>
+                  <button
+                    onClick={() => handleReject(reviewItem.id)}
+                    disabled={actionProcessing}
+                    className="px-3 py-1.5 text-[12px] border border-ink-200 rounded text-ink-700 hover:bg-cream-200 font-medium cursor-pointer disabled:opacity-50"
+                  >
+                    Dismiss Monitoring
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => handleReject(reviewItem.id)}
+                    disabled={actionProcessing}
+                    className="px-3 py-1.5 text-[12px] border border-brick-600/30 text-brick-700 bg-brick-50 hover:bg-brick-100 rounded font-medium cursor-pointer disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => handleApprove(reviewItem.id)}
+                    disabled={actionProcessing}
+                    className="px-3.5 py-1.5 text-[12px] bg-forest-700 hover:bg-forest-600 text-white rounded font-medium shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    Approve &amp; Execute
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </Modal>

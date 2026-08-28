@@ -21,7 +21,8 @@ from backend.app.models.signal import DemandSignal
 from backend.app.models.forecast import ForecastRecord
 from backend.app.main import app
 
-sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 results = []
 

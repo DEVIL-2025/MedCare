@@ -1,10 +1,11 @@
 from fastapi import Depends, HTTPException, status, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import Optional, Set
 
 from backend.app.database import get_db
-from backend.app.models.auth import User, Role, Permission
+from backend.app.models.auth import User, Role
 from backend.app.services.auth_service import AuthService
 
 
@@ -47,7 +48,12 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    res = await db.execute(select(User).where(User.id == user_pk))
+    query = (
+        select(User)
+        .options(selectinload(User.role).selectinload(Role.permissions))
+        .where(User.id == user_pk)
+    )
+    res = await db.execute(query)
     user = res.scalars().first()
 
     if not user:
@@ -57,7 +63,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not user.is_active:
+    if not bool(getattr(user, "is_active", True)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been deactivated. Please contact an administrator.",
@@ -65,8 +71,13 @@ async def get_current_user(
 
     # Attach set of permission codes for fast lookup
     perms: Set[str] = set()
-    if user.role and user.role.permissions:
-        perms = {p.permission_code for p in user.role.permissions}
+    user_role = getattr(user, "role", None)
+    if user_role and getattr(user_role, "permissions", None):
+        perms = {
+            p.permission_code
+            for p in user_role.permissions
+            if getattr(p, "permission_code", None)
+        }
     
     # Attach dynamically
     setattr(user, "permission_codes", perms)
@@ -90,7 +101,8 @@ async def get_optional_user(
 def require_permission(permission_code: str):
     """Factory creating a FastAPI dependency that verifies the user possesses a specific permission code."""
     async def permission_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role_id == "ADMIN":
+        user_role_id = str(getattr(current_user, "role_id", "") or "")
+        if user_role_id.upper() == "ADMIN":
             return current_user
         
         perms = getattr(current_user, "permission_codes", set())
@@ -106,7 +118,8 @@ def require_permission(permission_code: str):
 
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """FastAPI dependency that restricts endpoint access strictly to ADMIN users."""
-    if current_user.role_id != "ADMIN":
+    user_role_id = str(getattr(current_user, "role_id", "") or "")
+    if user_role_id.upper() != "ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access Denied: Administrator privileges required.",

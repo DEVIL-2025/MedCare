@@ -8,6 +8,8 @@ from backend.app.models.inventory import Inventory
 from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.batch import Batch
+from backend.app.models.replenishment import PurchaseOrder
+from backend.app.models.transfer import InventoryTransfer
 from backend.app.models.notification import NotificationLog
 from backend.app.config import settings
 
@@ -85,15 +87,13 @@ class AlertEscalationEngine:
         Dynamically synchronizes alerts in PostgreSQL with current live inventory & batch status:
         - If current_stock <= 0 -> generates/ensures active STOCKOUT alert (critical).
         - If current_stock < safety_stock -> generates/ensures active LOW_STOCK alert (critical).
-        - If current_stock < reorder_point -> generates/ensures active LOW_STOCK alert (warning).
-        - If current_stock >= reorder_point -> automatically resolves existing active stockout/low-stock alerts.
-        - If batches expiring <= 30d -> generates/ensures active EXPIRY_RISK alert.
+        - If current_stock <= reorder_point -> generates/ensures active LOW_STOCK alert (warning).
+        - If current_stock > reorder_point -> automatically resolves existing active stockout/low-stock alerts.
+        - If batches expiring <= settings.EXPIRY_CRITICAL_DAYS -> generates/ensures active EXPIRY_RISK alert.
         """
-        # Evaluate expiry risk against the actual date of each synchronization.
-        # A fixed date causes batches to remain incorrectly classified as
-        # near-expiry (or healthy) once that date has passed.
         today = date.today()
         now = _utc_now()
+        now_ms = int(now.timestamp() * 1000)
 
         # 1. Fetch matching active inventory items (active warehouses only)
         inv_query = (
@@ -110,19 +110,10 @@ class AlertEscalationEngine:
         inv_res = await session.execute(inv_query)
         items = inv_res.all()
 
-        # Bulk pre-fetch all existing alerts and batches (eliminates 384 N+1 queries)
+        # Bulk pre-fetch all existing active/relevant alerts, batches, active POs, and transfers
         all_alerts_res = await session.execute(select(Alert))
         alerts_by_node = {}
         for a in all_alerts_res.scalars().all():
-            if a.severity == "good":
-                if a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"]:
-                    a.severity = "critical"
-                elif a.alert_type in ["LOW_STOCK", "Low Stock"]:
-                    a.severity = "warning"
-                elif a.alert_type in ["EXPIRY_RISK", "Expiry Risk"]:
-                    a.severity = "warning"
-                else:
-                    a.severity = "medium"
             alerts_by_node.setdefault(f"{a.sku}_{a.warehouse_id}", []).append(a)
 
         all_batches_res = await session.execute(
@@ -132,41 +123,70 @@ class AlertEscalationEngine:
         for b in all_batches_res.scalars().all():
             batches_by_node.setdefault(f"{b.sku}_{b.warehouse_id}", []).append(b)
 
+        # Pre-fetch active POs (Draft, Sent, In Transit, Approved)
+        pos_res = await session.execute(
+            select(PurchaseOrder).where(PurchaseOrder.status.in_(["Draft", "Sent", "In Transit", "Approved", "PENDING", "SENT", "IN TRANSIT"]))
+        )
+        pos_by_node = {}
+        for po in pos_res.scalars().all():
+            pos_by_node.setdefault(f"{po.sku}_{po.warehouse_id}", []).append(po)
+
+        # Pre-fetch active Transfers (RECOMMENDED, APPROVED, IN_TRANSIT)
+        trfs_res = await session.execute(
+            select(InventoryTransfer).where(InventoryTransfer.status.in_(["RECOMMENDED", "APPROVED", "IN_TRANSIT", "Recommended", "Approved", "In Transit"]))
+        )
+        trfs_by_node = {}
+        for trf in trfs_res.scalars().all():
+            trfs_by_node.setdefault(f"{trf.sku}_{trf.destination_warehouse_id}", []).append(trf)
+
         modified_alerts = []
+        counter = 0
 
         for inv, prod in items:
+            counter += 1
             node_key = f"{inv.sku}_{inv.warehouse_id}"
             all_node_alerts = alerts_by_node.get(node_key, [])
             active_alerts = [a for a in all_node_alerts if a.status != "Resolved"]
-            recently_resolved = [
-                a for a in all_node_alerts
-                if a.status == "Resolved" and (
-                    (a.resolved_at and (now - a.resolved_at).total_seconds() < 43200) or
-                    (a.created_at and (now - a.created_at).total_seconds() < 43200 and not a.resolved_at)
-                )
-            ]
 
             stockout_alerts = [a for a in active_alerts if a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"]]
             lowstock_alerts = [a for a in active_alerts if a.alert_type in ["LOW_STOCK", "Low Stock"]]
             expiry_alerts = [a for a in active_alerts if a.alert_type in ["EXPIRY_RISK", "Expiry Risk"]]
 
-            resolved_stockout = any(a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"] for a in recently_resolved)
-            resolved_lowstock = any(a.alert_type in ["LOW_STOCK", "Low Stock"] for a in recently_resolved)
-            resolved_expiry = any(a.alert_type in ["EXPIRY_RISK", "Expiry Risk"] for a in recently_resolved)
+            active_pos = pos_by_node.get(node_key, [])
+            active_trfs = trfs_by_node.get(node_key, [])
+            is_order_in_flight = len(active_pos) > 0 or len(active_trfs) > 0 or (inv.inbound_stock or 0) > 0
 
-            # Condition 1: Total Stockout (0 units)
-            if inv.current_stock <= 0:
+            # If a Purchase Order or Transfer is created for this item, move the alert to the Resolved section!
+            if is_order_in_flight and (inv.current_stock <= inv.reorder_point or inv.current_stock <= 0):
+                ref_desc = ""
+                if active_pos:
+                    po_first = active_pos[0]
+                    ref_desc = f"Purchase Order {po_first.id} created ({po_first.quantity:,} units from {po_first.supplier_name})"
+                elif active_trfs:
+                    trf_first = active_trfs[0]
+                    ref_desc = f"FEFO Transfer {trf_first.id} initiated ({trf_first.quantity:,} units from {trf_first.source_warehouse_id})"
+                else:
+                    ref_desc = f"Inbound delivery of {inv.inbound_stock:,} units in transit"
+
+                for a in stockout_alerts + lowstock_alerts:
+                    a.status = "Resolved"
+                    a.resolved_at = now
+                    a.detail = f"Resolved: {ref_desc}. Expected to restore stock above threshold."
+                    modified_alerts.append(a)
+
+            # Condition 1: Total Stockout (0 units and no PO in flight)
+            elif inv.current_stock <= 0:
                 if not stockout_alerts:
                     new_alert = Alert(
-                        id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
+                        id=f"ALT-{now_ms}-{counter}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="STOCKOUT",
                         severity="critical",
                         sku=inv.sku,
                         product_name=prod.name,
                         warehouse_id=inv.warehouse_id,
-                        detail=f"Critical Stockout: {prod.name} ({inv.sku}) in {inv.warehouse_id} is completely OUT OF STOCK (0 units).",
-                        cause="Inventory depleted below zero balance.",
-                        recommended_action="Expedite emergency PO or inter-DC transfer immediately.",
+                        detail=f"Stockout: {prod.name} ({inv.sku}) is completely out of stock (0 units) at {inv.warehouse_id}.",
+                        cause=f"High dispensing velocity exhausted inventory buffer (Safety Stock: {inv.safety_stock:,}).",
+                        recommended_action="Create emergency purchase order or initiate inter-DC transfer immediately.",
                         owner="Supply Chain Planner",
                         status="New",
                         escalation_level=1,
@@ -180,6 +200,7 @@ class AlertEscalationEngine:
                 for la in lowstock_alerts:
                     la.status = "Resolved"
                     la.resolved_at = now
+                    modified_alerts.append(la)
 
             # Condition 2: Critical Low Stock (< Safety Stock)
             elif inv.current_stock < inv.safety_stock:
@@ -187,10 +208,11 @@ class AlertEscalationEngine:
                 for sa in stockout_alerts:
                     sa.status = "Resolved"
                     sa.resolved_at = now
+                    modified_alerts.append(sa)
 
                 if not lowstock_alerts:
                     new_alert = Alert(
-                        id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
+                        id=f"ALT-{now_ms}-{counter}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="LOW_STOCK",
                         severity="critical",
                         sku=inv.sku,
@@ -210,8 +232,11 @@ class AlertEscalationEngine:
                     modified_alerts.append(new_alert)
                 else:
                     for la in lowstock_alerts:
-                        la.severity = "critical"
-                        la.detail = f"Critical Low Stock: {prod.name} ({inv.sku}) at {inv.current_stock:,} units in {inv.warehouse_id} is below safety buffer ({inv.safety_stock:,})."
+                        if la.severity != "critical" or la.status == "Resolved":
+                            la.status = "New"
+                            la.severity = "critical"
+                            la.detail = f"Critical Low Stock: {prod.name} ({inv.sku}) at {inv.current_stock:,} units in {inv.warehouse_id} is below safety buffer ({inv.safety_stock:,})."
+                            modified_alerts.append(la)
 
             # Condition 3: Warning Low Stock (<= Reorder Point)
             elif inv.current_stock <= inv.reorder_point:
@@ -219,10 +244,11 @@ class AlertEscalationEngine:
                 for sa in stockout_alerts:
                     sa.status = "Resolved"
                     sa.resolved_at = now
+                    modified_alerts.append(sa)
 
                 if not lowstock_alerts:
                     new_alert = Alert(
-                        id=f"ALT-{int(now.timestamp())}-{inv.sku}-{inv.warehouse_id}",
+                        id=f"ALT-{now_ms}-{counter}-{inv.sku}-{inv.warehouse_id}",
                         alert_type="LOW_STOCK",
                         severity="warning",
                         sku=inv.sku,
@@ -242,8 +268,11 @@ class AlertEscalationEngine:
                     modified_alerts.append(new_alert)
                 else:
                     for la in lowstock_alerts:
-                        la.severity = "warning"
-                        la.detail = f"Low Stock: {prod.name} ({inv.sku}) at {inv.current_stock:,} units in {inv.warehouse_id} is below reorder point ({inv.reorder_point:,})."
+                        if la.severity != "warning" or la.status == "Resolved":
+                            la.status = "New"
+                            la.severity = "warning"
+                            la.detail = f"Low Stock: {prod.name} ({inv.sku}) at {inv.current_stock:,} units in {inv.warehouse_id} is below reorder point ({inv.reorder_point:,})."
+                            modified_alerts.append(la)
 
             # Condition 4: Healthy Stock (> Reorder Point) -> Auto-Resolve Deficit Alerts!
             else:
@@ -255,7 +284,8 @@ class AlertEscalationEngine:
 
             # Condition 5: Batch Expiry Check
             batches = batches_by_node.get(node_key, [])
-            near_expiry_batches = [b for b in batches if (b.expiry_date - today).days <= 30]
+            expiry_threshold_days = settings.EXPIRY_CRITICAL_DAYS
+            near_expiry_batches = [b for b in batches if (b.expiry_date - today).days <= expiry_threshold_days]
 
             if near_expiry_batches:
                 earliest_b = min(near_expiry_batches, key=lambda b: b.expiry_date)
@@ -263,9 +293,9 @@ class AlertEscalationEngine:
                 tot_exp_qty = sum(b.quantity for b in near_expiry_batches)
                 if not expiry_alerts:
                     new_exp_alert = Alert(
-                        id=f"ALT-{int(now.timestamp())}-EXP-{inv.sku}-{inv.warehouse_id}",
+                        id=f"ALT-{now_ms}-{counter}-EXP-{inv.sku}-{inv.warehouse_id}",
                         alert_type="EXPIRY_RISK",
-                        severity="critical" if d_exp <= 15 else "warning",
+                        severity="critical" if d_exp <= (expiry_threshold_days // 2) else "warning",
                         sku=inv.sku,
                         product_name=prod.name,
                         warehouse_id=inv.warehouse_id,
@@ -286,7 +316,7 @@ class AlertEscalationEngine:
                 for ea in expiry_alerts:
                     ea.status = "Resolved"
                     ea.resolved_at = now
-                    ea.detail = "Resolved: All active batches exceed 30-day expiry threshold."
+                    ea.detail = f"Resolved: All active batches exceed {expiry_threshold_days}-day expiry threshold."
                     modified_alerts.append(ea)
 
         await session.flush()
@@ -320,10 +350,10 @@ class AlertEscalationEngine:
             alert.escalation_level = min(3, alert.escalation_level + 1)
             alert.is_escalated = True
             if alert.escalation_level == 2:
-                alert.owner = "Rohan Mehta (SCM Manager)"
+                alert.owner = "SCM Manager"
                 alert.escalation_due_at = now + timedelta(hours=12)
             elif alert.escalation_level == 3:
-                alert.owner = "Vikram Nair (VP Supply Chain)"
+                alert.owner = "VP Supply Chain"
                 alert.escalation_due_at = now + timedelta(hours=4)
         else:
             raise ValueError(f"Unknown alert action: {action}")
@@ -352,10 +382,10 @@ class AlertEscalationEngine:
             a.escalation_level += 1
             a.is_escalated = True
             if a.escalation_level == 2:
-                a.owner = "Rohan Mehta (SCM Manager)"
+                a.owner = "SCM Manager"
                 a.escalation_due_at = now + timedelta(hours=12)
             elif a.escalation_level == 3:
-                a.owner = "Vikram Nair (VP Supply Chain)"
+                a.owner = "VP Supply Chain"
                 a.escalation_due_at = now + timedelta(hours=4)
 
         await session.flush()

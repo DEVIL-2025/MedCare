@@ -1,6 +1,6 @@
 import uuid
-from datetime import datetime, date, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 
@@ -10,7 +10,6 @@ from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.transaction import InventoryTransaction
 from backend.app.engines.expiry_fefo_engine import ExpiryFEFOEngine
-from backend.app.config import settings
 from backend.app.utils.timezone import get_today_ist
 
 
@@ -128,20 +127,32 @@ class InventoryEngine:
             inv.current_stock = new_stock
 
             if batch_id:
-                # Deduct from specific requested batch
+                # Deduct from specific requested batch, or fall back to multi-batch FEFO if quantity exceeds single batch
                 b_res = await session.execute(
                     select(Batch).where(and_(Batch.id == batch_id, Batch.warehouse_id == clean_wh_id, Batch.sku == clean_sku))
                 )
                 b = b_res.scalars().first()
-                if not b:
-                    raise ValueError(f"Batch '{batch_id}' not found for SKU {clean_sku} in warehouse {clean_wh_id}.")
-                if b.is_quarantined or b.status in ["EXPIRED", "QUARANTINED", "DEPLETED"] or b.expiry_date <= today:
-                    raise ValueError(f"Batch '{batch_id}' is expired or quarantined and cannot be allocated.")
-                if b.available_quantity < quantity:
-                    raise ValueError(f"Batch '{batch_id}' has insufficient available stock ({b.available_quantity} available, {quantity} requested).")
-                b.quantity -= quantity
-                if b.quantity == 0:
-                    b.status = "DEPLETED"
+                if b and not b.is_quarantined and b.status not in ["EXPIRED", "QUARANTINED", "DEPLETED"] and b.expiry_date > today and b.available_quantity >= quantity:
+                    b.quantity -= quantity
+                    if b.quantity == 0:
+                        b.status = "DEPLETED"
+                else:
+                    # Multi-batch FEFO allocation across warehouse batches
+                    allocations = await ExpiryFEFOEngine.allocate_fefo_batches(
+                        session=session,
+                        sku=clean_sku,
+                        warehouse_id=clean_wh_id,
+                        required_quantity=quantity
+                    )
+                    if not allocations:
+                        raise ValueError(f"No valid non-expired batches available to allocate for {clean_sku} in {clean_wh_id}.")
+                    for alloc in allocations:
+                        ab = alloc["batch"]
+                        deduct = alloc["allocated_quantity"]
+                        ab.quantity -= deduct
+                        if ab.quantity == 0:
+                            ab.status = "DEPLETED"
+                    allocated_batch_id = allocations[0]["batch_id"] if allocations else batch_id
             else:
                 # Centralized FEFO allocation
                 allocations = await ExpiryFEFOEngine.allocate_fefo_batches(
@@ -207,7 +218,8 @@ class InventoryEngine:
                     allocated_batch_id = target_batch_id
             else:
                 uid_suffix = uuid.uuid4().hex[:6].upper()
-                new_batch_id = f"BAT-{clean_sku}-{clean_wh_id}-{int(datetime.now(timezone.utc).timestamp())}-{uid_suffix}"
+                now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+                new_batch_id = f"BAT-{clean_sku}-{clean_wh_id}-{now_ts}-{uid_suffix}"
                 allocated_batch_id = new_batch_id
                 new_b = Batch(
                     id=new_batch_id,
@@ -228,16 +240,23 @@ class InventoryEngine:
         else:
             raise ValueError(f"Unsupported transaction type: {transaction_type}")
 
-        # Recalculate status and risk
+        # Recalculate status, risk, and days of cover
         status, risk = InventoryEngine.evaluate_inventory_status(
             inv.current_stock, inv.reorder_point, inv.safety_stock
         )
         inv.status = status
         inv.risk_level = risk
+        
+        # Estimate updated days of cover based on safety stock / reorder reference
+        daily_ref = max(1.0, float(inv.reorder_point or 500) / 30.0)
+        inv.days_of_cover = round(float(inv.current_stock) / daily_ref, 1)
+
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         inv.last_recalculated_at = now_utc
 
-        # Log transaction
+        # Log transaction with collision-free reference ID
+        now_utc_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        uid_ref = uuid.uuid4().hex[:6].upper()
         tx = InventoryTransaction(
             transaction_type=tx_type,
             sku=clean_sku,
@@ -246,7 +265,7 @@ class InventoryEngine:
             quantity=quantity if tx_type in ["RECEIPT", "TRANSFER_IN", "ADJUSTMENT"] else -quantity,
             previous_stock=prev_stock,
             new_stock=new_stock,
-            reference_id=reference_id or f"TX-{int(now_utc.timestamp())}",
+            reference_id=reference_id or f"TX-{now_utc_ms}-{uid_ref}",
             reason=reason or f"Standard {tx_type} operation",
             performed_by=performed_by,
             timestamp=now_utc

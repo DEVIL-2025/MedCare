@@ -10,6 +10,7 @@ from backend.app.models.transfer import InventoryTransfer
 from backend.app.models.inventory import Inventory
 from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
+from backend.app.models.supplier import Supplier
 from backend.app.models.batch import Batch
 from backend.app.engines.replenishment_engine import ReplenishmentEngine
 from backend.app.engines.network_balancing_engine import NetworkBalancingEngine
@@ -98,7 +99,9 @@ async def get_replenishment_overview(
     await ReplenishmentEngine.sync_recommendations(db, warehouse_id=warehouse, precomputed_forecasts=all_forecasts)
     await db.commit()
 
-    # 1. Fetch Active Recommendations from DB (Active warehouses & PENDING/ACKNOWLEDGED/IN_PROGRESS status)
+    # 1. Fetch Actionable Recommendations from DB (Active warehouses & PENDING/ACKNOWLEDGED/IN_PROGRESS status)
+    # Once approved, recommendations move to Tab 4 (Purchase Orders) for POs or Tab 2/3 (FEFO Transfers) for Transfers.
+    # INBOUND_MONITORING is separated and routed directly to Purchase Orders / Inbound Tracking.
     rec_query = (
         select(ReplenishmentRecommendation, Product)
         .join(Product, ReplenishmentRecommendation.sku == Product.sku)
@@ -117,6 +120,7 @@ async def get_replenishment_overview(
     rec_records = recs_res.all()
 
     recommendations_list = []
+    inbound_monitors_list = []
     category_cost_map = {}
     supplier_spend_map = {}
     supplier_lead_map = {}
@@ -131,7 +135,7 @@ async def get_replenishment_overview(
 
         next_rev_str = format_ist_date(r.next_review_date) if r.next_review_date else format_ist_date(today + timedelta(days=7))
 
-        recommendations_list.append({
+        rec_item_payload = {
             "id": r.id,
             "priority": r.priority,
             "sku": r.sku,
@@ -154,7 +158,11 @@ async def get_replenishment_overview(
             "reasonWhy": r.reason_why,
             "reasonWhen": r.reason_when,
             "reasonImpact": r.reason_impact
-        })
+        }
+
+        # Discard INBOUND_MONITORING recommendations; only actionable recommendations are shown
+        if r.decision_type not in ["INBOUND_MONITORING", "MONITOR", "Inbound Monitoring", "Monitor"]:
+            recommendations_list.append(rec_item_payload)
 
     # 2. Transfer Opportunities from DB (Active warehouses only)
     active_wh_subquery = select(Warehouse.id).where(Warehouse.is_active != False)
@@ -195,7 +203,7 @@ async def get_replenishment_overview(
             "status": t.status
         }
         for t, p in trf_records
-        if t.status in ["RECOMMENDED", "Recommended", "PENDING", "Pending"]
+        if t.status in ["RECOMMENDED", "Recommended", "PENDING", "Pending", "APPROVED", "Approved"]
     ]
 
     # 3. Dynamic Top Suppliers Breakdown from DB
@@ -235,7 +243,7 @@ async def get_replenishment_overview(
             "sku": po.sku,
             "warehouse": po.warehouse_id,
             "quantity": po.quantity,
-            "value": f"₹{round(po.total_cost_inr / 100000.0, 1)} L",
+            "value": f"₹{round(po.total_cost_inr / 100000.0, 2)} L" if (po.total_cost_inr or 0) >= 100000 else (f"₹{round(po.total_cost_inr / 1000.0, 1)} K" if (po.total_cost_inr or 0) >= 1000 else f"₹{int(po.total_cost_inr or 0)}"),
             "date": format_ist_date(po.order_date or po.created_at),
             "order_date": format_ist_date(po.order_date or po.created_at),
             "created_at": to_ist_iso(po.created_at) if hasattr(po, 'created_at') and po.created_at else None,
@@ -343,6 +351,7 @@ async def get_replenishment_overview(
 
     return {
         "recommendations": recommendations_list,
+        "inbound_monitoring": inbound_monitors_list,
         "transfer_opportunities": transfers_list,
         "top_suppliers": top_suppliers,
         "replenishment_by_category": replenishment_by_category,
@@ -506,11 +515,16 @@ async def acknowledge_demand(rec_id: str, db: AsyncSession = Depends(get_db)) ->
 
 @router.post("/{rec_id}/approve")
 @router.post("/recommendations/{rec_id}/approve")
-async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def approve_recommendation(
+    rec_id: str,
+    payload: Optional[Dict[str, Any]] = None,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
     """
     Approves a replenishment recommendation:
     - Updates recommendation status to 'APPROVED'
-    - Creates corresponding PurchaseOrder or InventoryTransfer
+    - Creates corresponding PurchaseOrder (with selected database Supplier) or InventoryTransfer
+    - Calculates exact lead time and ETA from the Supplier record in PostgreSQL
     - Updates inbound stock in Inventory
     - Broadcasts live WebSocket event
     """
@@ -537,7 +551,22 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
         if trf:
             trf.status = "APPROVED"
     else:
-        # Create PurchaseOrder
+        # Determine Supplier from payload or recommendation, and validate against DB suppliers
+        supp_name_req = (payload.get("supplier_name") or payload.get("supplier") or "").strip() if payload else ""
+        selected_supp_name = supp_name_req or rec.preferred_source
+
+        # Query supplier from database to get real lead_time_days
+        supp_res = await db.execute(select(Supplier).where(Supplier.is_active != False))
+        all_db_suppliers = supp_res.scalars().all()
+        
+        matched_supplier = next((s for s in all_db_suppliers if s.name.lower() == selected_supp_name.lower()), None)
+        if not matched_supplier and all_db_suppliers:
+            matched_supplier = all_db_suppliers[0]
+
+        final_supplier_name = matched_supplier.name if matched_supplier else selected_supp_name
+        lead_days = matched_supplier.lead_time_days if matched_supplier else 5
+
+        # Create PurchaseOrder in PostgreSQL
         po_id = f"PO-{int(datetime.now(timezone.utc).timestamp())}"
         unit_c = round(rec.estimated_cost_inr / max(1, rec.recommended_quantity), 2)
         po = PurchaseOrder(
@@ -545,18 +574,18 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
             recommendation_id=rec.id,
             sku=rec.sku,
             warehouse_id=rec.warehouse_id,
-            supplier_name=rec.preferred_source or "HealthGen Pharma",
+            supplier_name=final_supplier_name,
             quantity=rec.recommended_quantity,
             unit_cost_inr=unit_c,
             total_cost_inr=rec.estimated_cost_inr,
             order_date=today,
-            eta_date=today + timedelta(days=5),
+            eta_date=today + timedelta(days=lead_days),
             status="Approved",
             created_at=now_utc
         )
         db.add(po)
 
-        # Increment inbound stock
+        # Increment inbound stock in Inventory
         inv_res = await db.execute(
             select(Inventory).where(
                 Inventory.sku == rec.sku,
@@ -565,7 +594,7 @@ async def approve_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)
         )
         inv = inv_res.scalars().first()
         if inv:
-            inv.inbound_stock += rec.recommended_quantity
+            inv.inbound_stock = (inv.inbound_stock or 0) + rec.recommended_quantity
             inv.last_recalculated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Recalculate recommendations & transfers

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc, func
+from sqlalchemy import select
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
 
@@ -8,11 +8,10 @@ from backend.app.database import get_db
 from backend.app.models.alert import Alert
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.escalation import AlertEscalation
-from backend.app.models.transaction import InventoryTransaction
 from backend.app.schemas.alert import AlertActionRequest
 from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
 from backend.app.routers.ws import ws_manager
-from backend.app.utils.timezone import get_now_ist, get_today_ist, format_ist_datetime, format_ist_date, to_ist_iso
+from backend.app.utils.timezone import format_ist_datetime, to_ist_iso
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
 
@@ -91,6 +90,7 @@ async def get_alerts_overview(
         filtered_alerts.append({
             "id": a.id,
             "type": a.alert_type.replace("_", " ").title(),
+            "severity": a.severity,
             "category": a.severity,
             "sku": a.sku or "—",
             "product": a.product_name or "Multiple SKUs",
@@ -199,6 +199,7 @@ async def handle_alert_action(
     action_type = payload.action.lower().strip()
 
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    esc_id = f"ESC-{int(now_utc.timestamp() * 1000)}"
 
     if action_type in ["resolve", "mark resolved", "resolved"]:
         alert.status = "Resolved"
@@ -207,7 +208,7 @@ async def handle_alert_action(
         
         # Log resolution escalation
         esc = AlertEscalation(
-            id=f"ESC-{int(now_utc.timestamp())}",
+            id=esc_id,
             alert_id=alert.id,
             from_level=alert.escalation_level,
             to_level=alert.escalation_level,
@@ -228,7 +229,7 @@ async def handle_alert_action(
         alert.is_escalated = True
         
         esc = AlertEscalation(
-            id=f"ESC-{int(now_utc.timestamp())}",
+            id=esc_id,
             alert_id=alert.id,
             from_level=alert.escalation_level - 1,
             to_level=alert.escalation_level,

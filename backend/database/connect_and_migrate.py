@@ -11,8 +11,8 @@ from backend.app.database import AsyncSessionLocal
 
 
 # Pylance-safe UTF-8 configuration
-if isinstance(sys.stdout, io.TextIOWrapper):
-    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 
 async def test_dynamic_synchronization():

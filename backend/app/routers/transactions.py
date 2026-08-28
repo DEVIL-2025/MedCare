@@ -10,6 +10,7 @@ from backend.app.models.transaction import InventoryTransaction
 from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.transfer import InventoryTransfer
+from backend.app.models.replenishment import PurchaseOrder
 from backend.app.engines.inventory_engine import InventoryEngine
 from backend.app.engines.risk_engine import RiskEngine
 from backend.app.engines.alert_escalation_engine import AlertEscalationEngine
@@ -180,6 +181,30 @@ async def create_transaction(
             reason=payload.reason,
             performed_by=payload.performed_by or "Planner"
         )
+
+        # If a RECEIPT occurs, deduct inbound_stock and mark matching in-flight Purchase Orders as COMPLETED / FULFILLED
+        if (payload.transaction_type or "").upper() in ["RECEIPT", "TRANSFER_IN"]:
+            # Reduce inbound stock
+            if inv.inbound_stock > 0:
+                inv.inbound_stock = max(0, inv.inbound_stock - payload.quantity)
+            
+            # Find and complete matching active Purchase Orders in DB
+            po_match_res = await db.execute(
+                select(PurchaseOrder).where(
+                    and_(
+                        PurchaseOrder.sku == payload.sku,
+                        PurchaseOrder.warehouse_id == payload.warehouse_id,
+                        PurchaseOrder.status.in_(["Approved", "APPROVED", "Sent", "SENT", "Draft", "DRAFT", "In Transit", "IN TRANSIT"])
+                    )
+                ).order_by(PurchaseOrder.created_at.asc())
+            )
+            matching_pos = po_match_res.scalars().all()
+            rem_fulfill = payload.quantity
+            for matched_po in matching_pos:
+                if rem_fulfill <= 0:
+                    break
+                matched_po.status = "COMPLETED"
+                rem_fulfill -= matched_po.quantity
         
         # Recalculate Risk & Synchronize Alerts dynamically
         risk = await RiskEngine.evaluate_inventory_risk(db, payload.sku, payload.warehouse_id)

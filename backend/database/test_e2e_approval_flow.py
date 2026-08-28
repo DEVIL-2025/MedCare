@@ -6,7 +6,8 @@ from backend.app.main import app
 from backend.app.database import AsyncSessionLocal
 from sqlalchemy import text
 
-sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 
 async def test_e2e_approval_flow():

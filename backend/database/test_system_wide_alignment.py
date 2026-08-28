@@ -15,7 +15,8 @@ from backend.app.models.alert import Alert
 from backend.app.models.transaction import InventoryTransaction
 from backend.app.main import app
 
-sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 
 async def test_system_wide_alignment():

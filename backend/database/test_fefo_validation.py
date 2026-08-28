@@ -9,7 +9,8 @@ from backend.app.engines.expiry_fefo_engine import ExpiryFEFOEngine
 from backend.database.seed_fefo_test_data import seed_fefo_test_dataset
 from sqlalchemy import text
 
-sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 
 async def test_fefo_validation_pipeline():

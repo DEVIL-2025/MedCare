@@ -20,9 +20,20 @@ class ModelEvaluator:
         y_true = np.array(y_true, dtype=float)
         y_pred = np.array(y_pred, dtype=float)
 
+        if len(y_true) == 0 or len(y_pred) == 0:
+            return {
+                "mae": 0.0,
+                "rmse": 0.0,
+                "r2_score": 0.0,
+                "mape_pct": 0.0,
+                "wape_pct": 0.0,
+                "sample_count": 0,
+                "feature_importances": []
+            }
+
         mae = float(mean_absolute_error(y_true, y_pred))
         rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
-        r2 = float(r2_score(y_true, y_pred))
+        r2 = float(r2_score(y_true, y_pred)) if len(y_true) >= 2 else 0.0
 
         # Avoid zero division in MAPE
         mask = y_true > 0
@@ -38,10 +49,11 @@ class ModelEvaluator:
             importances = model.feature_importances_
             sorted_idx = np.argsort(importances)[::-1]
             for idx in sorted_idx:
-                feature_importance_list.append({
-                    "feature": feature_names[idx],
-                    "importance_pct": round(float(importances[idx]) * 100.0, 2)
-                })
+                if idx < len(feature_names):
+                    feature_importance_list.append({
+                        "feature": feature_names[idx],
+                        "importance_pct": round(float(importances[idx]) * 100.0, 2)
+                    })
 
         return {
             "mae": round(mae, 2),

@@ -1,5 +1,4 @@
-from datetime import date, timedelta
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
@@ -10,7 +9,7 @@ from backend.app.models.batch import Batch
 from backend.app.models.transfer import InventoryTransfer
 from backend.app.ml.predict import PredictionService
 from backend.app.config import settings
-from backend.app.utils.timezone import get_today_ist, get_now_ist
+from backend.app.utils.timezone import get_today_ist
 
 
 class NetworkBalancingEngine:
@@ -70,13 +69,15 @@ class NetworkBalancingEngine:
         trfs_res = await session.execute(select(InventoryTransfer))
         existing_trfs_map = {t.id: t for t in trfs_res.scalars().all()}
 
-        all_forecasts = precomputed_forecasts if precomputed_forecasts is not None else await PredictionService.predict_all_demands(session, 30)
+        all_forecasts = precomputed_forecasts if precomputed_forecasts is not None else await PredictionService.predict_all_demands(session, settings.FORECAST_HORIZON_DAYS)
 
         transfers = []
         active_trf_ids = set()
 
         for prod in products:
             sku = prod.sku
+            prod_moq = int(getattr(prod, "moq", 50) or 50)
+            prod_cost = float(getattr(prod, "unit_cost", 50.0) or 50.0)
             inventories = inventories_by_sku.get(sku, [])
 
             shortage_nodes = []
@@ -108,19 +109,19 @@ class NetworkBalancingEngine:
                         "daily_rate": daily_rate,
                         "doc": doc,
                         "deficit": max(
-                            prod.moq * 2 if prod.moq <= 100 else prod.moq,
-                            int(daily_rate * 7.0) if daily_rate > 0 else prod.moq,
+                            prod_moq * 2 if prod_moq <= 100 else prod_moq,
+                            int(daily_rate * 7.0) if daily_rate > 0 else prod_moq,
                             int(inv.reorder_point * 1.5 - inv.current_stock)
                         )
                     })
-                elif inv.status == "OVERSTOCK" or (doc >= 12.0 and doc != float("inf")) or inv.current_stock >= inv.reorder_point * 1.5:
+                elif (inv.status not in ["LOW_STOCK", "CRITICAL", "OUT_OF_STOCK"]) and (inv.available_stock > inv.safety_stock) and (inv.status == "OVERSTOCK" or (doc >= 12.0 and doc != float("inf")) or inv.current_stock >= inv.reorder_point * 1.5):
                     batches = batches_by_sku_wh.get(f"{sku}_{inv.warehouse_id}", [])
                     near_expiry_qty = sum(
                         b.quantity for b in batches if (b.expiry_date - today).days <= settings.EXPIRY_AT_RISK_DAYS
                     )
-                    surplus = max(0, int(inv.available_stock - inv.safety_stock))
+                    surplus = max(0, int(inv.available_stock - max(inv.safety_stock, inv.reorder_point)))
 
-                    if surplus >= min(50, prod.moq):
+                    if surplus >= min(50, prod_moq):
                         excess_nodes.append({
                             "warehouse_id": inv.warehouse_id,
                             "current_stock": inv.current_stock,
@@ -141,7 +142,7 @@ class NetworkBalancingEngine:
                         continue
 
                     available_transfer = min(e_node["surplus"], s_node["deficit"], e_node["available_stock"])
-                    min_req = min(50, prod.moq)
+                    min_req = min(50, prod_moq)
                     if available_transfer >= min_req:
                         # Find best batch from source (FEFO: earliest valid expiry)
                         chosen_batch = e_node["batches"][0] if e_node["batches"] else None
@@ -156,7 +157,7 @@ class NetworkBalancingEngine:
                         if transfer_qty < min_req:
                             continue
 
-                        savings = round(transfer_qty * prod.unit_cost * NetworkBalancingEngine.TRANSFER_SAVINGS_FACTOR, 2)
+                        savings = round(transfer_qty * prod_cost * NetworkBalancingEngine.TRANSFER_SAVINGS_FACTOR, 2)
 
                         days_to_exp = (chosen_batch.expiry_date - today).days if chosen_batch else 60
                         doc_str = f"{round(s_node['doc'], 1)}d" if s_node["doc"] != float("inf") else "N/A"
@@ -200,8 +201,9 @@ class NetworkBalancingEngine:
                             session.add(trf)
                             active_trf_ids.add(trf_id)
 
-                        # Deduct from excess node surplus so it's not double counted
+                        # Deduct from excess node surplus and available stock so it's not double counted
                         e_node["surplus"] -= transfer_qty
+                        e_node["available_stock"] -= transfer_qty
 
         # Clean up any obsolete RECOMMENDED transfers whose conditions no longer exist in DB
         for trf_id, existing_trf in existing_trfs_map.items():

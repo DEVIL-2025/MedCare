@@ -1,11 +1,14 @@
+import os
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import logging
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.app.config import settings
-from fastapi.responses import JSONResponse, FileResponse
-from backend.app.database import engine, Base, AsyncSessionLocal, init_database, check_db_health
+from backend.app.database import AsyncSessionLocal, init_database, check_db_health
 from backend.app.utils.data_seeder import seed_database
 from backend.app.routers import (
     dashboard,
@@ -64,9 +67,6 @@ app = FastAPI(
     description="Unified SCM Control Tower for MedCare Pharma (Cognizant NPN Hackathon E1 + P1)",
     lifespan=lifespan
 )
-
-import os
-from fastapi.staticfiles import StaticFiles
 
 # Configure CORS for Vite React frontend
 app.add_middleware(
@@ -146,8 +146,9 @@ frontend_dist_paths = [
 ]
 active_dist_path = next((p for p in frontend_dist_paths if os.path.exists(p) and os.path.isdir(p)), None)
 
-if active_dist_path:
-    assets_dir = os.path.join(active_dist_path, "assets")
+if active_dist_path is not None:
+    spa_dir: str = active_dist_path
+    assets_dir = os.path.join(spa_dir, "assets")
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
@@ -156,10 +157,10 @@ if active_dist_path:
         # Allow API, docs, and OpenAPI schema to pass through
         if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
             return None
-        file_path = os.path.join(active_dist_path, full_path)
+        file_path = os.path.join(spa_dir, full_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
-        index_file = os.path.join(active_dist_path, "index.html")
+        index_file = os.path.join(spa_dir, "index.html")
         if os.path.exists(index_file):
             return FileResponse(index_file)
         return {"message": "MedCare SCM Backend API Active"}

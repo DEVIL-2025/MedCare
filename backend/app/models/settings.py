@@ -1,13 +1,19 @@
-from sqlalchemy import Column, String, Text, DateTime
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from typing import Optional
+from sqlalchemy import String, Text, DateTime
+from sqlalchemy.orm import Mapped, mapped_column
 from backend.app.database import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class SystemSetting(Base):
     __tablename__ = "system_settings"
 
-    key = Column(String(80), primary_key=True, index=True)
-    category = Column(String(50), default="General", index=True)  # Inventory, Demand, Replenishment, Notifications, General
-    value = Column(Text, nullable=False)
-    description = Column(Text, nullable=True)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    key: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    category: Mapped[str] = mapped_column(String(50), default="General", nullable=False, index=True)  # Inventory, Demand, Replenishment, Notifications, General
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)

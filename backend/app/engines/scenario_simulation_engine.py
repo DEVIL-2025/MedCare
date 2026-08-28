@@ -1,7 +1,7 @@
-from datetime import date, timedelta, datetime, timezone
-from typing import Dict, Any, List
+from datetime import timedelta, datetime, timezone
+from typing import Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, func
 
 from backend.app.models.inventory import Inventory
 from backend.app.models.product import Product
@@ -62,10 +62,10 @@ class ScenarioSimulationEngine:
             .join(Product, Batch.sku == Product.sku)
             .where(Batch.expiry_date <= today + timedelta(days=90), Batch.quantity > 0)
         )
-        base_expiry_risk_inr = b_res.scalar() or 0.0
+        base_expiry_risk_inr = float(b_res.scalar() or 0.0)
 
         # Authoritative ML baseline forecasts
-        all_forecasts = await PredictionService.predict_all_demands(session, 30)
+        all_forecasts = await PredictionService.predict_all_demands(session, settings.FORECAST_HORIZON_DAYS)
 
         # Compute dynamic live baseline from DB & ML Forecasts
         base_stockout_count = 0
@@ -81,13 +81,18 @@ class ScenarioSimulationEngine:
             prod = products.get(inv.sku)
             if not prod:
                 continue
-            if category_filter != "All Categories" and prod.category != category_filter:
+            if category_filter != "All Categories" and getattr(prod, "category", "") != category_filter:
                 continue
             if warehouse_filter != "All Warehouses" and inv.warehouse_id != warehouse_filter:
                 continue
 
             filtered_inventories.append(inv)
-            inv_val = inv.current_stock * prod.unit_cost
+            prod_cost = float(getattr(prod, "unit_cost", 0.0) or 50.0)
+            inv_curr = int(getattr(inv, "current_stock", 0) or 0)
+            inv_inbound = int(getattr(inv, "inbound_stock", 0) or 0)
+            inv_safety = int(getattr(inv, "safety_stock", 0) or 0)
+
+            inv_val = inv_curr * prod_cost
             base_total_inv_val += inv_val
 
             wh = warehouses.get(inv.warehouse_id)
@@ -98,24 +103,25 @@ class ScenarioSimulationEngine:
                 base_daily_demand = float(f_data["sensed_daily"])
                 base_30d_demand = float(f_data.get("forecast_demand_next_30d", base_daily_demand * 30.0))
             else:
-                base_daily_demand = float(prod.default_reorder_point / 30.0) if prod.default_reorder_point > 0 else 10.0
+                default_rop = getattr(prod, "default_reorder_point", 200) or 200
+                base_daily_demand = float(default_rop / 30.0) if default_rop > 0 else 10.0
                 base_30d_demand = base_daily_demand * 30.0
 
             base_expected_demand += base_30d_demand
 
-            base_deficit = (inv.current_stock + inv.inbound_stock) - base_30d_demand
+            base_deficit = (inv_curr + inv_inbound) - base_30d_demand
             if base_deficit < 0:
                 base_stockout_count += 1
-                base_stockout_val += abs(base_deficit) * prod.unit_cost
-                base_fillable_demand += max(0.0, inv.current_stock + inv.inbound_stock)
+                base_stockout_val += abs(base_deficit) * prod_cost
+                base_fillable_demand += max(0.0, float(inv_curr + inv_inbound))
             else:
                 base_fillable_demand += base_30d_demand
 
             # Base replenishment
             base_lead_time_demand = base_daily_demand * (base_lead_time + settings.LEAD_TIME_BUFFER_DAYS)
-            base_target = base_lead_time_demand + inv.safety_stock
-            base_rep_qty = max(0.0, base_target - (inv.current_stock + inv.inbound_stock))
-            base_replenish_val += base_rep_qty * prod.unit_cost
+            base_target = base_lead_time_demand + inv_safety
+            base_rep_qty = max(0.0, base_target - (inv_curr + inv_inbound))
+            base_replenish_val += base_rep_qty * prod_cost
 
         base_service_level = round((base_fillable_demand / max(1.0, base_expected_demand)) * 100.0, 1)
         base_service_level = min(100.0, max(0.0, base_service_level))
@@ -140,6 +146,11 @@ class ScenarioSimulationEngine:
             if not prod:
                 continue
 
+            prod_cost = float(getattr(prod, "unit_cost", 0.0) or 50.0)
+            inv_curr = int(getattr(inv, "current_stock", 0) or 0)
+            inv_inbound = int(getattr(inv, "inbound_stock", 0) or 0)
+            inv_safety = int(getattr(inv, "safety_stock", 0) or 0)
+
             wh = warehouses.get(inv.warehouse_id)
             base_lead_time = wh.lead_time_days if (wh and wh.lead_time_days) else 5
 
@@ -147,9 +158,10 @@ class ScenarioSimulationEngine:
             if f_data and "sensed_daily" in f_data:
                 base_daily_demand = float(f_data["sensed_daily"])
             else:
-                base_daily_demand = float(prod.default_reorder_point / 30.0) if prod.default_reorder_point > 0 else 10.0
+                default_rop = getattr(prod, "default_reorder_point", 200) or 200
+                base_daily_demand = float(default_rop / 30.0) if default_rop > 0 else 10.0
 
-            sim_current_stock = inv.current_stock * inv_start_mult
+            sim_current_stock = inv_curr * inv_start_mult
             sim_daily_demand = base_daily_demand * demand_mult
 
             # Effective lead time
@@ -160,17 +172,17 @@ class ScenarioSimulationEngine:
             sim_expected_demand += total_30d_demand
 
             # Stock balance over 30 days constrained by fulfillment throughput capacity
-            effective_available = (sim_current_stock + inv.inbound_stock) * effective_capacity_mult
+            effective_available = (sim_current_stock + inv_inbound) * effective_capacity_mult
             deficit = effective_available - total_30d_demand
             if deficit < 0:
                 stockout_units = int(abs(deficit))
                 sim_stockout_count += 1
-                stockout_val = stockout_units * prod.unit_cost
+                stockout_val = stockout_units * prod_cost
                 sim_stockout_val += stockout_val
                 fillable = max(0.0, effective_available)
                 sim_fillable_demand += fillable
 
-                curr_stockout_est = max(0, int(base_daily_demand * 30.0 - (inv.current_stock + inv.inbound_stock)))
+                curr_stockout_est = max(0, int(base_daily_demand * 30.0 - (inv_curr + inv_inbound)))
                 affected_skus.append({
                     "sku": prod.sku,
                     "name": prod.name,
@@ -183,9 +195,9 @@ class ScenarioSimulationEngine:
                 sim_fillable_demand += total_30d_demand
 
             # Replenishment requirement
-            target_stock = lead_time_demand + (inv.safety_stock * demand_mult)
-            sim_replenish_qty = max(0.0, target_stock - (sim_current_stock + inv.inbound_stock))
-            sim_replenish_val += sim_replenish_qty * prod.unit_cost
+            target_stock = lead_time_demand + (inv_safety * demand_mult)
+            sim_replenish_qty = max(0.0, target_stock - (sim_current_stock + inv_inbound))
+            sim_replenish_val += sim_replenish_qty * prod_cost
 
         # Overall Simulated Service Level (unconstrained by artificial floors)
         sim_service_level = round((sim_fillable_demand / max(1.0, sim_expected_demand)) * 100.0, 1)
@@ -196,7 +208,7 @@ class ScenarioSimulationEngine:
 
         # Generate 16-Week Projected Impact Trajectory
         impact_trend = []
-        net_stock = sum(i.current_stock for i in filtered_inventories) * inv_start_mult
+        net_stock = sum(int(getattr(i, "current_stock", 0) or 0) for i in filtered_inventories) * inv_start_mult
         weekly_sim_demand = sim_expected_demand / 4.0
         weekly_sim_replenish = sim_replenish_val / 4.0
         curr_proj_stock = net_stock
@@ -317,14 +329,14 @@ class ScenarioSimulationEngine:
             calculated_at=now_utc
         )
         session.add(result)
-        await session.commit()
+        await session.flush()
 
         affected_skus.sort(key=lambda x: x["scenarioStockout"], reverse=True)
 
         results_alias = {
             "projected_service_level": sim_service_level,
             "weekly_trajectory": impact_trend,
-            "current_inventory_units": sum(i.current_stock for i in filtered_inventories),
+            "current_inventory_units": sum(int(getattr(i, "current_stock", 0) or 0) for i in filtered_inventories),
             "stockout_skus": sim_stockout_count,
             "stockout_value": sim_stockout_val,
             "replenishment_need": sim_replenish_val

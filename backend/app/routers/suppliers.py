@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
-from typing import List, Dict, Any, Optional
+from sqlalchemy import select
+from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 
@@ -55,9 +55,9 @@ async def create_supplier(
         name=clean_name,
         contact_email=payload.contact_email,
         contact_phone=payload.contact_phone,
-        lead_time_days=payload.lead_time_days or 5,
+        lead_time_days=int(payload.lead_time_days or 5),
         category=payload.category,
-        status=payload.status or "Active",
+        status=str(payload.status or "Active"),
         is_active=True,
         created_at=now_utc
     )
@@ -94,13 +94,13 @@ async def update_supplier(
     if payload.contact_phone is not None:
         supplier.contact_phone = payload.contact_phone
     if payload.lead_time_days is not None:
-        supplier.lead_time_days = payload.lead_time_days
+        supplier.lead_time_days = int(payload.lead_time_days)
     if payload.category is not None:
         supplier.category = payload.category
     if payload.status is not None:
-        supplier.status = payload.status
+        supplier.status = str(payload.status)
     if payload.is_active is not None:
-        supplier.is_active = payload.is_active
+        supplier.is_active = bool(payload.is_active)
 
     await db.commit()
     await db.refresh(supplier)

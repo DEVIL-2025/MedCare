@@ -1,27 +1,33 @@
-from sqlalchemy import Column, String, Integer, Float, DateTime, Date, ForeignKey, Index, Text
-from datetime import datetime
+from datetime import datetime, date, timezone
+from typing import Optional
+from sqlalchemy import String, Integer, Float, DateTime, Date, ForeignKey, Index, Text
+from sqlalchemy.orm import Mapped, mapped_column
 from backend.app.database import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ForecastRecord(Base):
     __tablename__ = "forecasts"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    sku = Column(String(50), ForeignKey("products.sku"), nullable=False, index=True)
-    warehouse_id = Column(String(20), ForeignKey("warehouses.id"), nullable=False, index=True)
-    forecast_date = Column(Date, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sku: Mapped[str] = mapped_column(String(50), ForeignKey("products.sku"), nullable=False, index=True)
+    warehouse_id: Mapped[str] = mapped_column(String(20), ForeignKey("warehouses.id"), nullable=False, index=True)
+    forecast_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     
-    baseline_demand = Column(Float, default=0.0)
-    sensed_demand = Column(Float, default=0.0)  # Sensed with recent trends & signals
-    final_forecast = Column(Float, nullable=False)
-    lower_bound = Column(Float, default=0.0)
-    upper_bound = Column(Float, default=0.0)
+    baseline_demand: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    sensed_demand: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    final_forecast: Mapped[float] = mapped_column(Float, nullable=False)
+    lower_bound: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    upper_bound: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     
-    confidence_pct = Column(Float, default=87.0)
-    trend_direction = Column(String(20), default="Increasing")  # Increasing, Stable, Decreasing
-    primary_driver = Column(String(100), default="Flu Season Surge")
+    confidence_pct: Mapped[float] = mapped_column(Float, default=87.0, nullable=False)
+    trend_direction: Mapped[str] = mapped_column(String(20), default="Increasing", nullable=False)
+    primary_driver: Mapped[str] = mapped_column(String(100), default="Flu Season Surge", nullable=False)
     
-    generated_at = Column(DateTime, default=datetime.utcnow)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (
         Index("ix_forecast_sku_wh_date", "sku", "warehouse_id", "forecast_date"),
@@ -31,15 +37,15 @@ class ForecastRecord(Base):
 class DemandSurgeEvent(Base):
     __tablename__ = "demand_surge_events"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    sku = Column(String(50), ForeignKey("products.sku"), nullable=False, index=True)
-    warehouse_id = Column(String(20), ForeignKey("warehouses.id"), nullable=False, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sku: Mapped[str] = mapped_column(String(50), ForeignKey("products.sku"), nullable=False, index=True)
+    warehouse_id: Mapped[str] = mapped_column(String(20), ForeignKey("warehouses.id"), nullable=False, index=True)
     
-    normal_demand = Column(Float, nullable=False)
-    recent_sensed_demand = Column(Float, nullable=False)
-    surge_pct = Column(Float, nullable=False)  # e.g. +60.0%
-    severity = Column(String(20), default="HIGH")  # CRITICAL, HIGH, MEDIUM
+    normal_demand: Mapped[float] = mapped_column(Float, nullable=False)
+    recent_sensed_demand: Mapped[float] = mapped_column(Float, nullable=False)
+    surge_pct: Mapped[float] = mapped_column(Float, nullable=False)  # e.g. +60.0%
+    severity: Mapped[str] = mapped_column(String(20), default="HIGH", nullable=False)
     
-    detected_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String(30), default="ACTIVE")  # ACTIVE, MITIGATED, RESOLVED
-    explanation = Column(Text, nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE", nullable=False)
+    explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

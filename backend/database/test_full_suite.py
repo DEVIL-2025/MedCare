@@ -5,7 +5,8 @@ import sys
 from backend.app.database import engine, Base, AsyncSessionLocal
 from sqlalchemy import text
 
-sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 
 async def run_comprehensive_suite():

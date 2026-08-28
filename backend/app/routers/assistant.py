@@ -1,22 +1,20 @@
 import re
-from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, or_
 
 from backend.app.database import get_db
 from backend.app.models.inventory import Inventory
 from backend.app.models.product import Product
 from backend.app.models.warehouse import Warehouse
 from backend.app.models.batch import Batch
-from backend.app.models.replenishment import ReplenishmentRecommendation, PurchaseOrder
+from backend.app.models.replenishment import ReplenishmentRecommendation
 from backend.app.models.transfer import InventoryTransfer
 from backend.app.models.alert import Alert
 from backend.app.models.transaction import InventoryTransaction
-from backend.app.models.demand import DemandHistory, SeasonalEvent
-from backend.app.models.forecast import ForecastRecord, DemandSurgeEvent
+from backend.app.models.forecast import ForecastRecord
 from backend.app.ml.predict import PredictionService
 from backend.app.engines.inventory_engine import InventoryEngine
 from backend.app.services.gemini_service import gemini_service
@@ -55,40 +53,42 @@ async def assistant_chat(
     # 1. Pre-load active master catalogs
     prods_res = await db.execute(select(Product).where(Product.is_active != False))
     products = prods_res.scalars().all()
-    products_by_sku = {p.sku.upper(): p for p in products}
+    products_by_sku: Dict[Optional[str], Product] = {str(p.sku).upper(): p for p in products}
 
     wh_res = await db.execute(select(Warehouse).where(Warehouse.is_active != False))
     warehouses = wh_res.scalars().all()
-    wh_map = {w.id.upper(): w for w in warehouses}
+    wh_map: Dict[Optional[str], Warehouse] = {str(w.id).upper(): w for w in warehouses}
 
     # Extract detected SKU or Warehouse in query with smart token matching
-    detected_sku = None
-    for sku, p in products_by_sku.items():
-        if sku.lower() in query_text:
-            detected_sku = sku
+    detected_sku: Optional[str] = None
+    for raw_sku, p in products_by_sku.items():
+        sku_str = str(raw_sku or "")
+        if sku_str and sku_str.lower() in query_text:
+            detected_sku = sku_str
             break
         p_clean = re.sub(r'[^a-zA-Z0-9\s]', '', p.name).lower()
         if p_clean in query_text:
-            detected_sku = sku
+            detected_sku = sku_str
             break
         tokens = [t for t in p_clean.split() if len(t) >= 4 and t not in ['units', 'syrup', 'inhaler', 'validation', 'tablets']]
         if any(t in query_text for t in tokens):
-            detected_sku = sku
+            detected_sku = sku_str
             break
 
-    detected_wh = None
-    for wh_id, w in wh_map.items():
-        if wh_id.lower() in query_text:
-            detected_wh = wh_id
+    detected_wh: Optional[str] = None
+    for raw_wh_id, w in wh_map.items():
+        wh_str = str(raw_wh_id or "")
+        if wh_str and wh_str.lower() in query_text:
+            detected_wh = wh_str
             break
         w_clean = re.sub(r'[^a-zA-Z0-9\s]', '', w.name).lower()
         loc_clean = re.sub(r'[^a-zA-Z0-9\s]', '', w.location).lower()
         if w_clean in query_text or loc_clean in query_text:
-            detected_wh = wh_id
+            detected_wh = wh_str
             break
         wh_tokens = [t for t in (w_clean + " " + loc_clean).split() if len(t) >= 4 and t not in ['regional', 'warehouse', 'distribution', 'center']]
         if any(t in query_text for t in wh_tokens):
-            detected_wh = wh_id
+            detected_wh = wh_str
             break
 
     # If request specifies a warehouse filter explicitly
@@ -167,9 +167,10 @@ async def assistant_chat(
         low_items = res.all()
 
         if not low_items:
-            scope_desc = f"in {wh_map[detected_wh].name} ({detected_wh})" if detected_wh else "across the network"
-            if detected_sku:
-                prod = products_by_sku[detected_sku]
+            wh_obj = wh_map.get(detected_wh) if detected_wh else None
+            scope_desc = f"in {wh_obj.name} ({detected_wh})" if (wh_obj and detected_wh) else "across the network"
+            prod = products_by_sku.get(detected_sku) if detected_sku else None
+            if prod and detected_sku:
                 answer = f"✅ **{prod.name} ({detected_sku})** is currently **above** its reorder threshold {scope_desc}. No low-stock condition is detected."
             else:
                 answer = f"✅ **No Low Stock Items**: All active pharmaceutical inventory items {scope_desc} are currently operating above their configured Reorder Points (ROP)."
@@ -181,11 +182,12 @@ async def assistant_chat(
             for inv, prod, wh in low_items[:10]:
                 status_formatted, _ = InventoryEngine.evaluate_inventory_status(inv.current_stock, inv.reorder_point, inv.safety_stock)
                 status_formatted = status_formatted.replace("_", " ").title()
+                doc_val = float(inv.days_of_cover or 0.0)
                 lines.append(
                     f"• **{prod.name}** (`{prod.sku}`) @ **{wh.id}** ({wh.name}):\n"
                     f"  - **Current Stock**: {inv.current_stock:,} {prod.unit or 'Units'}\n"
                     f"  - **Reorder Point (ROP)**: {inv.reorder_point:,} | **Safety Stock**: {inv.safety_stock:,}\n"
-                    f"  - **Days of Cover**: {inv.days_of_cover:.1f}d | **Status**: {status_formatted}"
+                    f"  - **Days of Cover**: {doc_val:.1f}d | **Status**: {status_formatted}"
                 )
                 item_data_list.append({
                     "sku": prod.sku,
@@ -196,7 +198,7 @@ async def assistant_chat(
                     "current_stock": inv.current_stock,
                     "reorder_point": inv.reorder_point,
                     "safety_stock": inv.safety_stock,
-                    "days_of_cover": inv.days_of_cover,
+                    "days_of_cover": doc_val,
                     "status": status_formatted,
                     "unit": prod.unit or "Units"
                 })
@@ -311,10 +313,11 @@ async def assistant_chat(
             item_data_list = []
             for inv, prod, wh in over_items[:8]:
                 ratio = round(inv.current_stock / max(1, inv.reorder_point), 1)
+                doc_val = float(inv.days_of_cover or 0.0)
                 lines.append(
                     f"• **{prod.name}** (`{prod.sku}`) @ **{wh.id}**:\n"
                     f"  - **Current Stock**: {inv.current_stock:,} units ({ratio}x Reorder Point: {inv.reorder_point:,})\n"
-                    f"  - **Days of Cover**: {inv.days_of_cover:.1f}d | **Safety Stock**: {inv.safety_stock:,}"
+                    f"  - **Days of Cover**: {doc_val:.1f}d | **Safety Stock**: {inv.safety_stock:,}"
                 )
                 item_data_list.append({
                     "sku": prod.sku,
@@ -323,7 +326,7 @@ async def assistant_chat(
                     "current_stock": inv.current_stock,
                     "reorder_point": inv.reorder_point,
                     "ratio_to_rop": ratio,
-                    "days_of_cover": inv.days_of_cover
+                    "days_of_cover": doc_val
                 })
 
             answer = (
@@ -335,7 +338,9 @@ async def assistant_chat(
 
     elif is_rop_config_query and detected_sku:
         category = "Inventory Policy"
-        prod = products_by_sku[detected_sku]
+        prod = products_by_sku.get(detected_sku)
+        if not prod:
+            prod = Product(sku=detected_sku, name=detected_sku, default_reorder_point=200, default_safety_stock=80, moq=50, unit_cost=50.0)
         inv_query = (
             select(Inventory, Warehouse)
             .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
@@ -365,9 +370,10 @@ async def assistant_chat(
                 }
                 for inv, wh in inv_configs
             ]
+            unit_cost_val = float(prod.unit_cost or 50.0)
             answer = (
                 f"⚙️ **Inventory Policy & Thresholds for {prod.name} ({detected_sku})**:\n"
-                f"- **Catalog Unit Price**: ₹{prod.unit_cost:.2f}\n"
+                f"- **Catalog Unit Price**: ₹{unit_cost_val:.2f}\n"
                 f"- **Minimum Order Qty (MOQ)**: {prod.moq:,} {prod.unit or 'Units'}\n\n"
                 f"**Warehouse-Specific Thresholds**:\n"
                 + "\n".join(lines)
@@ -376,7 +382,7 @@ async def assistant_chat(
                 "sku": detected_sku,
                 "product_name": prod.name,
                 "moq": prod.moq,
-                "unit_cost": prod.unit_cost,
+                "unit_cost": unit_cost_val,
                 "warehouse_policies": config_data
             }
             suggested_actions = [f"Edit {prod.name} Settings", "Check Stock Level"]
@@ -647,7 +653,8 @@ async def assistant_chat(
                     ml_data = None
 
             if ml_data and ml_data.get("forecast_demand_next_30d"):
-                prod = products_by_sku[detected_sku]
+                prod = products_by_sku.get(detected_sku)
+                prod_name = prod.name if prod else detected_sku
                 wh_target = detected_wh or "MUM-01"
                 total_30d = ml_data.get("forecast_demand_next_30d", 0)
                 sensed_daily = ml_data.get("sensed_daily", 0.0)
@@ -658,7 +665,7 @@ async def assistant_chat(
                 peak_units = ml_data.get("predicted_peak_units", 0)
 
                 answer = (
-                    f"📈 **ML Demand Forecast for {prod.name} ({detected_sku}) @ {wh_target}**:\n"
+                    f"📈 **ML Demand Forecast for {prod_name} ({detected_sku}) @ {wh_target}**:\n"
                     f"- **30-Day Projected Demand**: {total_30d:,} units\n"
                     f"- **Sensed Daily Velocity**: {sensed_daily:.1f} units/day\n"
                     f"- **Predicted Peak**: {peak_units:,} units ({peak_date})\n"
@@ -668,7 +675,7 @@ async def assistant_chat(
                 )
                 data = {
                     "sku": detected_sku,
-                    "product_name": prod.name,
+                    "product_name": prod_name,
                     "warehouse_id": wh_target,
                     "forecast_horizon_days": 30,
                     "forecast_demand_next_30d": total_30d,
@@ -679,7 +686,7 @@ async def assistant_chat(
                     "primary_driver": driver
                 }
                 suggested_actions = [
-                    f"View {prod.name} in Demand Forecast",
+                    f"View {prod_name} in Demand Forecast",
                     "Inspect ML Model Transparency",
                     "Check Replenishment Recommendations"
                 ]
@@ -742,7 +749,9 @@ async def assistant_chat(
     # =========================================================================
     elif detected_sku:
         category = "Product Inventory"
-        prod = products_by_sku[detected_sku]
+        prod = products_by_sku.get(detected_sku)
+        if not prod:
+            prod = Product(sku=detected_sku, name=detected_sku, category="General", unit="Units", unit_cost=50.0, moq=50)
         inv_query = (
             select(Inventory, Warehouse)
             .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
@@ -779,12 +788,13 @@ async def assistant_chat(
                 for inv, wh in inv_list
             ]
 
+            unit_cost_val = float(prod.unit_cost or 50.0)
             answer = (
                 f"📊 **Inventory Status for {prod.name} ({detected_sku})**:\n"
                 f"- **Category**: {prod.category}\n"
                 f"- **Total Physical Stock**: **{total_st:,} {prod.unit or 'Units'}**\n"
                 f"- **Available for Dispensing**: **{total_avail:,} units**\n"
-                f"- **Unit Price**: ₹{prod.unit_cost:.2f}\n"
+                f"- **Unit Price**: ₹{unit_cost_val:.2f}\n"
                 f"- **MOQ**: {prod.moq:,} units\n\n"
                 f"**Regional Warehouse Breakdown**:\n" + "\n".join(breakdowns)
             )
@@ -792,7 +802,7 @@ async def assistant_chat(
                 "sku": detected_sku,
                 "product_name": prod.name,
                 "category": prod.category,
-                "unit_cost_inr": prod.unit_cost,
+                "unit_cost_inr": unit_cost_val,
                 "total_stock": total_st,
                 "total_available_stock": total_avail,
                 "warehouse_breakdown": breakdown_dicts

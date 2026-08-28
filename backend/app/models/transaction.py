@@ -1,8 +1,12 @@
 from typing import Optional
 from sqlalchemy import String, Integer, DateTime, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column
-from datetime import datetime
+from datetime import datetime, timezone
 from backend.app.database import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class InventoryTransaction(Base):
@@ -20,5 +24,5 @@ class InventoryTransaction(Base):
     
     reference_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Order #, Invoice #, Transfer #
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    performed_by: Mapped[str] = mapped_column(String(80), default="System")
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    performed_by: Mapped[str] = mapped_column(String(80), default="System", nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)

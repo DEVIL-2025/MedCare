@@ -14,8 +14,8 @@ export default {
         slate2: { 700: '#3A423E', 600: '#68716D', 100: '#E9EBE8' },
       },
       fontFamily: {
-        heading: ['"Inter"', 'system-ui', 'sans-serif'],
-        sans: ['"Inter"', 'system-ui', 'sans-serif'],
+        heading: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
       },
       boxShadow: {
         card: '0 1px 2px rgba(32,37,34,0.04)',

@@ -1,49 +1,55 @@
-from sqlalchemy import Column, String, Integer, Float, DateTime, Text, JSON
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List
+from sqlalchemy import String, Integer, Float, DateTime, Text, JSON
+from sqlalchemy.orm import Mapped, mapped_column
 from backend.app.database import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Scenario(Base):
     __tablename__ = "scenarios"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(120), nullable=False)
-    description = Column(Text, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Input parameters
-    demand_change_pct = Column(Float, default=20.0)
-    lead_time_change_days = Column(Integer, default=3)
-    starting_inventory_change_pct = Column(Float, default=0.0)
-    capacity_constraint_pct = Column(Float, default=0.0)
-    distributor_demand_change_pct = Column(Float, default=0.0)
+    demand_change_pct: Mapped[float] = mapped_column(Float, default=20.0, nullable=False)
+    lead_time_change_days: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    starting_inventory_change_pct: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    capacity_constraint_pct: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    distributor_demand_change_pct: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     
-    category_filter = Column(String(80), default="All")
-    warehouse_filter = Column(String(50), default="All")
+    category_filter: Mapped[str] = mapped_column(String(80), default="All", nullable=False)
+    warehouse_filter: Mapped[str] = mapped_column(String(50), default="All", nullable=False)
     
-    status = Column(String(30), default="Completed")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    status: Mapped[str] = mapped_column(String(30), default="Completed", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class ScenarioResult(Base):
     __tablename__ = "scenario_results"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    scenario_id = Column(Integer, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scenario_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     
-    projected_stockout_skus = Column(Integer, default=0)
-    stockout_value_inr = Column(Float, default=0.0)
-    stockout_value_formatted = Column(String(50), default="₹0.0 Cr")
+    projected_stockout_skus: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stockout_value_inr: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    stockout_value_formatted: Mapped[str] = mapped_column(String(50), default="₹0.0 Cr", nullable=False)
     
-    avg_service_level_pct = Column(Float, default=85.0)
-    total_replenishment_need_inr = Column(Float, default=0.0)
-    total_replenishment_formatted = Column(String(50), default="₹0.0 Cr")
+    avg_service_level_pct: Mapped[float] = mapped_column(Float, default=85.0, nullable=False)
+    total_replenishment_need_inr: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    total_replenishment_formatted: Mapped[str] = mapped_column(String(50), default="₹0.0 Cr", nullable=False)
     
-    inventory_holding_cost_inr = Column(Float, default=0.0)
-    obsolete_expiry_risk_inr = Column(Float, default=0.0)
+    inventory_holding_cost_inr: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    obsolete_expiry_risk_inr: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     
     # Structured impact details (e.g. time series trend, affected SKUs list)
-    impact_trend_json = Column(JSON, nullable=True)
-    affected_skus_json = Column(JSON, nullable=True)
-    comparison_metrics_json = Column(JSON, nullable=True)
+    impact_trend_json: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    affected_skus_json: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    comparison_metrics_json: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     
-    calculated_at = Column(DateTime, default=datetime.utcnow)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
