@@ -812,7 +812,7 @@ export default function TransactionModal({
             disabled={loading}
             className="px-4 py-1.5 bg-forest-700 hover:bg-forest-600 text-white rounded text-[12px] font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
           >
-            {loading ? 'Submitting to Database...' : 'Commit Transaction to DB'}
+            {loading ? 'Submitting to Database...' : 'Update Inventory'}
           </button>
         </div>
       </form>

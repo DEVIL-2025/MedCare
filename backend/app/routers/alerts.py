@@ -44,14 +44,23 @@ async def get_alerts_overview(
     res = await db.execute(query)
     all_alerts = res.scalars().all()
 
+    # Deduplicate: Show exactly one most recent active/resolved alert per node (sku + warehouse)
+    seen_nodes = set()
+    deduped_alerts = []
+    for a in all_alerts:
+        node_id = f"{a.sku}_{a.warehouse_id}_{a.alert_type}_{a.status == 'Resolved'}"
+        if node_id not in seen_nodes:
+            seen_nodes.add(node_id)
+            deduped_alerts.append(a)
+
     # Dynamic Severity Counts
     counts = {
-        "critical": len([a for a in all_alerts if a.severity == "critical" and a.status != "Resolved"]),
-        "warning": len([a for a in all_alerts if a.severity == "warning" and a.status != "Resolved"]),
-        "medium": len([a for a in all_alerts if a.severity == "medium" and a.status != "Resolved"]),
-        "info": len([a for a in all_alerts if a.severity == "info" and a.status != "Resolved"]),
-        "good": len([a for a in all_alerts if a.status == "Resolved"]),
-        "total": len([a for a in all_alerts if a.status != "Resolved"])
+        "critical": len([a for a in deduped_alerts if a.severity == "critical" and a.status != "Resolved"]),
+        "warning": len([a for a in deduped_alerts if a.severity == "warning" and a.status != "Resolved"]),
+        "medium": len([a for a in deduped_alerts if a.severity == "medium" and a.status != "Resolved"]),
+        "info": len([a for a in deduped_alerts if a.severity == "info" and a.status != "Resolved"]),
+        "good": len([a for a in deduped_alerts if a.status == "Resolved"]),
+        "total": len([a for a in deduped_alerts if a.status != "Resolved"])
     }
 
     # Filter by category/tab
@@ -66,7 +75,7 @@ async def get_alerts_overview(
     search_lower = search.lower().strip() if search else ""
 
     filtered_alerts = []
-    for a in all_alerts:
+    for a in deduped_alerts:
         if wanted is None:
             # Main "All Alerts" tab: Exclude Resolved alerts
             if a.status == "Resolved":
@@ -108,7 +117,7 @@ async def get_alerts_overview(
 
     # Dynamic Alert Type Distribution from DB (Active Alerts only)
     type_counts = {}
-    for a in all_alerts:
+    for a in deduped_alerts:
         if a.status != "Resolved":
             t_raw = a.alert_type or "STOCKOUT"
             formatted_type = t_raw.replace("_", " ").title()

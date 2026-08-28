@@ -257,7 +257,7 @@ export default function AddProductModal({ open, onClose, onProductAdded }) {
             disabled={loading}
             className="px-4 py-1.5 text-[13px] font-medium bg-forest-700 text-white rounded-md hover:bg-forest-600 disabled:opacity-50 shadow-sm cursor-pointer"
           >
-            {loading ? 'Registering Product...' : 'Add Product to DB'}
+            {loading ? 'Registering Product...' : 'Update Inventory'}
           </button>
         </div>
       </form>

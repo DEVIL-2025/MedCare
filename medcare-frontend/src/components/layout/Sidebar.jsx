@@ -54,7 +54,7 @@ export default function Sidebar({ isAiAssistantOpen, onToggleAiAssistant }) {
         className="flex items-center gap-2.5 px-5 py-5 border-b border-emerald-500/15 cursor-pointer select-none relative z-10 hover:bg-white/[0.02] transition-colors"
       >
         <div className="w-7 h-7 rounded-md bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-sm shadow-emerald-950/50">
-          <Cross size={14} className="text-[#08281E]" />
+          <Cross size={14} className="text-white fill-white" />
         </div>
         <div>
           <div className="text-[14px] font-semibold leading-tight tracking-tight text-white flex items-center gap-1.5">

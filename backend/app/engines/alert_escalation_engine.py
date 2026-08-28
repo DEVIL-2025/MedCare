@@ -123,7 +123,7 @@ class AlertEscalationEngine:
         for b in all_batches_res.scalars().all():
             batches_by_node.setdefault(f"{b.sku}_{b.warehouse_id}", []).append(b)
 
-        # Pre-fetch active POs (Draft, Sent, In Transit, Approved)
+        # Pre-fetch actual active POs (Draft, Sent, In Transit, Approved)
         pos_res = await session.execute(
             select(PurchaseOrder).where(PurchaseOrder.status.in_(["Draft", "Sent", "In Transit", "Approved", "PENDING", "SENT", "IN TRANSIT"]))
         )
@@ -131,9 +131,9 @@ class AlertEscalationEngine:
         for po in pos_res.scalars().all():
             pos_by_node.setdefault(f"{po.sku}_{po.warehouse_id}", []).append(po)
 
-        # Pre-fetch active Transfers (RECOMMENDED, APPROVED, IN_TRANSIT)
+        # Pre-fetch ONLY approved/executed Transfers (APPROVED, IN_TRANSIT, IN_PROGRESS)
         trfs_res = await session.execute(
-            select(InventoryTransfer).where(InventoryTransfer.status.in_(["RECOMMENDED", "APPROVED", "IN_TRANSIT", "Recommended", "Approved", "In Transit"]))
+            select(InventoryTransfer).where(InventoryTransfer.status.in_(["APPROVED", "IN_TRANSIT", "IN_PROGRESS", "Approved", "In Transit"]))
         )
         trfs_by_node = {}
         for trf in trfs_res.scalars().all():
@@ -148,15 +148,16 @@ class AlertEscalationEngine:
             all_node_alerts = alerts_by_node.get(node_key, [])
             active_alerts = [a for a in all_node_alerts if a.status != "Resolved"]
 
-            stockout_alerts = [a for a in active_alerts if a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"]]
-            lowstock_alerts = [a for a in active_alerts if a.alert_type in ["LOW_STOCK", "Low Stock"]]
-            expiry_alerts = [a for a in active_alerts if a.alert_type in ["EXPIRY_RISK", "Expiry Risk"]]
+            stockout_alerts = [a for a in all_node_alerts if a.alert_type in ["STOCKOUT", "Stockout", "STOCKOUT_RISK", "Stockout Risk"]]
+            lowstock_alerts = [a for a in all_node_alerts if a.alert_type in ["LOW_STOCK", "Low Stock"]]
+            expiry_alerts = [a for a in all_node_alerts if a.alert_type in ["EXPIRY_RISK", "Expiry Risk"]]
 
             active_pos = pos_by_node.get(node_key, [])
             active_trfs = trfs_by_node.get(node_key, [])
-            is_order_in_flight = len(active_pos) > 0 or len(active_trfs) > 0 or (inv.inbound_stock or 0) > 0
+            # An order is truly in flight only if a real active PO or approved transfer exists in the database
+            is_order_in_flight = len(active_pos) > 0 or len(active_trfs) > 0
 
-            # If a Purchase Order or Transfer is created for this item, move the alert to the Resolved section!
+            # If a Purchase Order or Transfer is approved/created in DB for this item, move the alert to Resolved!
             if is_order_in_flight and (inv.current_stock <= inv.reorder_point or inv.current_stock <= 0):
                 ref_desc = ""
                 if active_pos:
@@ -165,8 +166,6 @@ class AlertEscalationEngine:
                 elif active_trfs:
                     trf_first = active_trfs[0]
                     ref_desc = f"FEFO Transfer {trf_first.id} initiated ({trf_first.quantity:,} units from {trf_first.source_warehouse_id})"
-                else:
-                    ref_desc = f"Inbound delivery of {inv.inbound_stock:,} units in transit"
 
                 for a in stockout_alerts + lowstock_alerts:
                     a.status = "Resolved"
