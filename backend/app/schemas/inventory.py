@@ -17,6 +17,7 @@ class ProductCreate(BaseModel):
     is_temperature_sensitive: Optional[bool] = False
     initial_warehouse_id: Optional[str] = None
     initial_stock: Optional[int] = 0
+    initial_expiry_date: Optional[str] = None
 
 
 class ProductResponse(BaseModel):

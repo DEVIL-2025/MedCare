@@ -20,3 +20,52 @@ h1, h2, h3, h4, h5, h6 {
 input, button, select, textarea, table, th, td, span, p, a, div {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
 }
+
+/* Conveyor & Moving Box Animations */
+@keyframes beltScroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-32px);
+  }
+}
+
+@keyframes boxMove {
+  0% {
+    left: 0%;
+    opacity: 1;
+  }
+  80% {
+    left: 88%;
+    opacity: 1;
+  }
+  94% {
+    left: 100%;
+    opacity: 0.1;
+  }
+  98% {
+    left: 104%;
+    opacity: 0;
+  }
+  100% {
+    left: 104%;
+    opacity: 0;
+  }
+}
+
+.animate-belt-scroll {
+  animation: beltScroll 0.7s linear infinite !important;
+}
+
+.animate-box-move-1 {
+  animation: boxMove 4.2s ease-in-out infinite !important;
+}
+
+.animate-box-move-2 {
+  animation: boxMove 4.2s ease-in-out 1.4s infinite !important;
+}
+
+.animate-box-move-3 {
+  animation: boxMove 4.2s ease-in-out 2.8s infinite !important;
+}

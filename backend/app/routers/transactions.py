@@ -177,6 +177,7 @@ async def create_transaction(
             warehouse_id=payload.warehouse_id,
             quantity=payload.quantity,
             batch_id=payload.batch_id,
+            expiry_date=payload.expiry_date,
             reference_id=payload.reference_id,
             reason=payload.reason,
             performed_by=payload.performed_by or "Planner"

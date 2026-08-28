@@ -283,22 +283,26 @@ class AlertEscalationEngine:
 
             # Condition 5: Batch Expiry Check
             batches = batches_by_node.get(node_key, [])
-            expiry_threshold_days = settings.EXPIRY_CRITICAL_DAYS
+            expiry_threshold_days = settings.EXPIRY_AT_RISK_DAYS  # 90 days threshold
+            critical_threshold_days = settings.EXPIRY_CRITICAL_DAYS  # 30 days threshold
             near_expiry_batches = [b for b in batches if (b.expiry_date - today).days <= expiry_threshold_days]
 
             if near_expiry_batches:
                 earliest_b = min(near_expiry_batches, key=lambda b: b.expiry_date)
                 d_exp = (earliest_b.expiry_date - today).days
                 tot_exp_qty = sum(b.quantity for b in near_expiry_batches)
+                target_severity = "critical" if d_exp <= critical_threshold_days else "warning"
+                target_detail = f"Expiry Risk: Batch {earliest_b.id} ({tot_exp_qty:,} units) expires in {d_exp} days ({earliest_b.expiry_date.strftime('%d %b %Y')})."
+
                 if not expiry_alerts:
                     new_exp_alert = Alert(
                         id=f"ALT-{now_ms}-{counter}-EXP-{inv.sku}-{inv.warehouse_id}",
                         alert_type="EXPIRY_RISK",
-                        severity="critical" if d_exp <= (expiry_threshold_days // 2) else "warning",
+                        severity=target_severity,
                         sku=inv.sku,
                         product_name=prod.name,
                         warehouse_id=inv.warehouse_id,
-                        detail=f"Expiry Risk: Batch {earliest_b.id} ({tot_exp_qty:,} units) expires in {d_exp} days ({earliest_b.expiry_date.strftime('%d %b %Y')}).",
+                        detail=target_detail,
                         cause="FEFO near-expiry threshold reached.",
                         recommended_action="Execute FEFO dispatch or inter-DC transfer to high-velocity DC.",
                         owner="Quality Assurance Lead",
@@ -310,13 +314,22 @@ class AlertEscalationEngine:
                     )
                     session.add(new_exp_alert)
                     modified_alerts.append(new_exp_alert)
+                else:
+                    for ea in expiry_alerts:
+                        if ea.status == "Resolved" or ea.severity != target_severity or ea.detail != target_detail:
+                            ea.status = "New"
+                            ea.severity = target_severity
+                            ea.detail = target_detail
+                            ea.resolved_at = None
+                            modified_alerts.append(ea)
             else:
                 # All batches healthy -> auto-resolve any active expiry alerts
                 for ea in expiry_alerts:
-                    ea.status = "Resolved"
-                    ea.resolved_at = now
-                    ea.detail = f"Resolved: All active batches exceed {expiry_threshold_days}-day expiry threshold."
-                    modified_alerts.append(ea)
+                    if ea.status != "Resolved":
+                        ea.status = "Resolved"
+                        ea.resolved_at = now
+                        ea.detail = f"Resolved: All active batches exceed {expiry_threshold_days}-day expiry threshold."
+                        modified_alerts.append(ea)
 
         await session.flush()
         return modified_alerts

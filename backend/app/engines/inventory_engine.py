@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 
@@ -48,6 +48,7 @@ class InventoryEngine:
         warehouse_id: str,
         quantity: int,
         batch_id: Optional[str] = None,
+        expiry_date: Optional[Any] = None,
         reference_id: Optional[str] = None,
         reason: Optional[str] = None,
         performed_by: str = "Planner"
@@ -178,8 +179,25 @@ class InventoryEngine:
             new_stock = prev_stock + quantity
             inv.current_stock = new_stock
 
+            # Parse user-specified expiry date if provided
+            parsed_exp_date = None
+            if expiry_date:
+                if isinstance(expiry_date, datetime):
+                    parsed_exp_date = expiry_date.date()
+                elif hasattr(expiry_date, "year") and hasattr(expiry_date, "month") and hasattr(expiry_date, "day"):
+                    parsed_exp_date = expiry_date
+                elif isinstance(expiry_date, str) and expiry_date.strip():
+                    try:
+                        parsed_exp_date = datetime.strptime(expiry_date.strip()[:10], "%Y-%m-%d").date()
+                    except Exception:
+                        pass
+
             # Add to or create batch
             default_shelf_life = product.shelf_life_days if (product and product.shelf_life_days) else 730
+            final_exp_date = parsed_exp_date or (today + timedelta(days=default_shelf_life))
+            d_to_exp = (final_exp_date - today).days
+            initial_status = "EXPIRED" if d_to_exp <= 0 else ("CRITICAL" if d_to_exp <= 30 else ("NEAR_EXPIRY" if d_to_exp <= 90 else "ACTIVE"))
+
             if batch_id:
                 dest_batch_id = f"{batch_id}-{clean_wh_id}"
                 b_res = await session.execute(
@@ -193,14 +211,18 @@ class InventoryEngine:
                 existing_b = b_res.scalars().first()
                 if existing_b:
                     existing_b.quantity += quantity
-                    if existing_b.status in ["DEPLETED", "EXPIRED"]:
+                    if parsed_exp_date:
+                        existing_b.expiry_date = parsed_exp_date
+                        existing_d_exp = (existing_b.expiry_date - today).days
+                        existing_b.status = "EXPIRED" if existing_d_exp <= 0 else ("CRITICAL" if existing_d_exp <= 30 else ("NEAR_EXPIRY" if existing_d_exp <= 90 else "ACTIVE"))
+                    elif existing_b.status in ["DEPLETED", "EXPIRED"]:
                         existing_b.status = "ACTIVE"
                     allocated_batch_id = existing_b.id
                 else:
                     # Check if source batch exists to copy expiry_date / mfg_date
                     src_b_res = await session.execute(select(Batch).where(Batch.id == batch_id))
                     src_b = src_b_res.scalars().first()
-                    exp_date = src_b.expiry_date if src_b else today + timedelta(days=default_shelf_life)
+                    exp_date = parsed_exp_date or (src_b.expiry_date if src_b else final_exp_date)
                     mfg_date = src_b.mfg_date if src_b else today
 
                     target_batch_id = dest_batch_id if (src_b and src_b.warehouse_id != clean_wh_id) else batch_id
@@ -212,7 +234,7 @@ class InventoryEngine:
                         reserved_quantity=0,
                         mfg_date=mfg_date,
                         expiry_date=exp_date,
-                        status="ACTIVE"
+                        status=initial_status
                     )
                     session.add(new_b)
                     allocated_batch_id = target_batch_id
@@ -228,8 +250,8 @@ class InventoryEngine:
                     quantity=quantity,
                     reserved_quantity=0,
                     mfg_date=today,
-                    expiry_date=today + timedelta(days=default_shelf_life),
-                    status="ACTIVE"
+                    expiry_date=final_exp_date,
+                    status=initial_status
                 )
                 session.add(new_b)
 

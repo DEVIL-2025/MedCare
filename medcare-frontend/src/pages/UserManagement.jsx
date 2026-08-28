@@ -11,7 +11,7 @@ import LoadingState from '../components/ui/LoadingState';
 import ErrorState from '../components/ui/ErrorState';
 import EmptyState from '../components/ui/EmptyState';
 import Modal from '../components/ui/Modal';
-import { formatDateTime, formatDate } from '../utils/dateUtils';
+import { formatDateTime } from '../utils/dateUtils';
 
 export default function UserManagement() {
   const { user: currentAdmin } = useAuth();

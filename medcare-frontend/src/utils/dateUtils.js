@@ -10,8 +10,10 @@ export const IST_TIMEZONE = 'Asia/Kolkata';
  * Clean custom configuration options before passing to Intl.DateTimeFormat.
  */
 function sanitizeIntlOptions(options = {}) {
-  const { hideZone, fallback, includeSeconds, ...intlOptions } = options;
-  return intlOptions;
+  const customKeys = new Set(['hideZone', 'fallback', 'includeSeconds']);
+  return Object.fromEntries(
+    Object.entries(options).filter(([k]) => !customKeys.has(k))
+  );
 }
 
 /**
@@ -105,7 +107,7 @@ export function formatDate(dateInput, options = {}) {
       'en-IN',
       { ...defaultOptions, ...sanitizeIntlOptions(options) }
     ).format(d);
-  } catch (err) {
+  } catch {
     return d.toLocaleDateString('en-IN', { timeZone: IST_TIMEZONE });
   }
 }
@@ -132,7 +134,7 @@ export function formatTime(dateInput, options = {}) {
       { ...defaultOptions, ...sanitizeIntlOptions(options) }
     ).format(d);
     return options.hideZone ? formatted : `${formatted} IST`;
-  } catch (err) {
+  } catch {
     return d.toLocaleTimeString('en-IN', { timeZone: IST_TIMEZONE });
   }
 }

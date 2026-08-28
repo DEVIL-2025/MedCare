@@ -32,6 +32,11 @@ export default function AddProductModal({ open, onClose, onProductAdded }) {
   const [safetyStock, setSafetyStock] = useState(4000);
   const [initialWarehouse, setInitialWarehouse] = useState('MUM-01');
   const [initialStock, setInitialStock] = useState(5000);
+  const [initialExpiryDate, setInitialExpiryDate] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 2);
+    return d.toISOString().split('T')[0];
+  });
   const [isTempSensitive, setIsTempSensitive] = useState(false);
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -71,6 +76,7 @@ export default function AddProductModal({ open, onClose, onProductAdded }) {
         default_safety_stock: Number(safetyStock),
         initial_warehouse_id: initialWarehouse,
         initial_stock: Number(initialStock),
+        initial_expiry_date: initialExpiryDate,
         is_temperature_sensitive: isTempSensitive
       });
 
@@ -203,7 +209,7 @@ export default function AddProductModal({ open, onClose, onProductAdded }) {
         {/* Initial Stock Allocation */}
         <div className="p-3 bg-cream-100 rounded-lg border border-ink-100 space-y-2">
           <span className="text-[11.5px] font-bold text-ink-900 block">Initial Warehouse Batch Allocation (Optional)</span>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-[11px] text-ink-500 block mb-1">Receiving Distribution Center</label>
               <select
@@ -223,6 +229,15 @@ export default function AddProductModal({ open, onClose, onProductAdded }) {
                 min="0"
                 value={initialStock}
                 onChange={(e) => setInitialStock(e.target.value)}
+                className="w-full px-2.5 py-1.5 border border-ink-200 rounded bg-white focus:outline-none focus:border-forest-600 text-[12px]"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-ink-500 block mb-1">Initial Batch Expiry Date</label>
+              <input
+                type="date"
+                value={initialExpiryDate}
+                onChange={(e) => setInitialExpiryDate(e.target.value)}
                 className="w-full px-2.5 py-1.5 border border-ink-200 rounded bg-white focus:outline-none focus:border-forest-600 text-[12px]"
               />
             </div>

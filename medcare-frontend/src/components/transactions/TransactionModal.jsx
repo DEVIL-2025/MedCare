@@ -60,6 +60,7 @@ export default function TransactionModal({
   const [quantity, setQuantity] = useState(250);
   const [warehouses, setWarehouses] = useState([]);
   const [liveStock, setLiveStock] = useState(initStockVal);
+  const [availableBatches, setAvailableBatches] = useState([]);
   const [dbUnitCost, setDbUnitCost] = useState(Number(initCostVal));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -194,6 +195,16 @@ export default function TransactionModal({
           setLiveStock(0);
           setActualPhysicalCount(0);
         }
+
+        // Also fetch live batches in FEFO order for this SKU + Warehouse
+        try {
+          const bList = await api.getBatches({ sku: cleanSku, warehouse: cleanWh });
+          if (isMounted) {
+            setAvailableBatches(Array.isArray(bList) ? bList.filter(b => b.quantity > 0) : []);
+          }
+        } catch {
+          if (isMounted) setAvailableBatches([]);
+        }
       } catch (err) {
         console.warn('Failed to fetch live stock for warehouse selection:', err);
       }
@@ -272,6 +283,9 @@ export default function TransactionModal({
       } else if (type === 'RECEIPT') {
         payload.quantity = Number(quantity);
         payload.batch_id = batchId || `BAT-${sku.toUpperCase()}-${cleanWh}-${Date.now().toString().slice(-4)}`;
+        payload.expiry_date = expiryDate;
+        payload.unit_cost = Number(activeUnitCost);
+        payload.supplier_name = supplierName;
         payload.reference_id = poNumber;
         payload.reason = `Inbound Receipt from ${supplierName} (PO: ${poNumber}, Rate: ₹${activeUnitCost}, Exp: ${expiryDate})`;
       } else if (type === 'ADJUSTMENT') {
@@ -457,8 +471,36 @@ export default function TransactionModal({
                 />
               </div>
             </div>
-            <div className="text-[11px] text-forest-700 bg-forest-100/60 p-2 rounded border border-forest-600/20">
-              ⚡ <strong>FEFO Guarantee:</strong> Units will be allocated automatically against the nearest-expiry batch in {warehouse}.
+            <div className="text-[11.5px] text-forest-900 bg-forest-100/70 p-2.5 rounded border border-forest-600/30 space-y-1.5">
+              <div className="flex items-center justify-between font-bold">
+                <span className="flex items-center gap-1">⚡ Strict FEFO Dispatch Queue:</span>
+                <span className="text-[10px] bg-forest-200 text-forest-900 px-1.5 py-0.5 rounded font-mono">Earliest Expiry First</span>
+              </div>
+              {availableBatches.length > 0 ? (
+                <div className="space-y-1 pt-0.5">
+                  {availableBatches.slice(0, 3).map((b, idx) => (
+                    <div key={b.id} className="flex items-center justify-between font-mono text-[11px] bg-white/70 px-2 py-1 rounded border border-forest-600/15">
+                      <span className="font-semibold text-ink-800">{idx + 1}. {b.id} ({Number(b.quantity).toLocaleString()} units)</span>
+                      <span className={`px-1.5 py-0.2 rounded font-semibold ${
+                        b.daysToExpiry <= 30
+                          ? 'bg-brick-100 text-brick-700'
+                          : b.daysToExpiry <= 90
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-cream-200 text-forest-800'
+                      }`}>
+                        Exp: {b.expiryDate} ({b.daysToExpiry}d left - {b.daysToExpiry <= 30 ? 'Critical' : b.daysToExpiry <= 90 ? 'Near Expiry' : 'Safe'})
+                      </span>
+                    </div>
+                  ))}
+                  {availableBatches.length > 3 && (
+                    <div className="text-[10px] text-ink-500 italic text-right">+{availableBatches.length - 3} additional batches in queue</div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[11px] text-forest-700 italic">
+                  Units will be allocated automatically against the nearest-expiry batch in {warehouse}.
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -675,6 +717,12 @@ export default function TransactionModal({
                 />
               </div>
             </div>
+
+            {availableBatches.length > 0 && (
+              <div className="text-[11px] text-purple-900 bg-purple-100/60 p-2 rounded border border-purple-600/20 font-mono">
+                ⚡ <strong>FEFO Transfer Source:</strong> Units deducted from nearest-expiry batch <strong>{availableBatches[0].id}</strong> (Exp: {availableBatches[0].expiryDate}, {availableBatches[0].daysToExpiry}d remaining).
+              </div>
+            )}
           </div>
         )}
 
@@ -729,6 +777,12 @@ export default function TransactionModal({
                 className="w-full text-[12px] border border-ink-200 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-forest-600"
               />
             </div>
+
+            {availableBatches.length > 0 && (
+              <div className="text-[11px] text-forest-900 bg-forest-100/60 p-2 rounded border border-forest-600/20 font-mono">
+                ⚡ <strong>FEFO Dispensing:</strong> Units allocated from nearest-expiry batch <strong>{availableBatches[0].id}</strong> (Exp: {availableBatches[0].expiryDate}, {availableBatches[0].daysToExpiry}d remaining).
+              </div>
+            )}
           </div>
         )}
 

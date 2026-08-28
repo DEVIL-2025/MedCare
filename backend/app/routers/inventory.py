@@ -431,6 +431,17 @@ async def add_product(
         db.add(inv)
 
         if initial_qty > 0:
+            parsed_init_exp = None
+            if payload.initial_expiry_date:
+                try:
+                    parsed_init_exp = datetime.strptime(payload.initial_expiry_date.strip()[:10], "%Y-%m-%d").date()
+                except Exception:
+                    pass
+            
+            final_init_exp = parsed_init_exp or today.replace(year=today.year + (new_prod.shelf_life_days // 365 or 2))
+            d_init_exp = (final_init_exp - today).days
+            b_status = "EXPIRED" if d_init_exp <= 0 else ("CRITICAL" if d_init_exp <= 30 else ("NEAR_EXPIRY" if d_init_exp <= 90 else "ACTIVE"))
+
             batch_id = f"BAT-{new_prod.sku}-{w.id}-INIT"
             batch = Batch(
                 id=batch_id,
@@ -439,10 +450,15 @@ async def add_product(
                 quantity=initial_qty,
                 reserved_quantity=0,
                 mfg_date=today,
-                expiry_date=today.replace(year=today.year + (new_prod.shelf_life_days // 365 or 2)),
-                status="ACTIVE"
+                expiry_date=final_init_exp,
+                status=b_status
             )
             db.add(batch)
+
+    # Recalculate risk and synchronize alerts across active warehouses
+    for w in all_whs:
+        await RiskEngine.evaluate_inventory_risk(db, new_prod.sku, w.id)
+        await AlertEscalationEngine.sync_inventory_alerts(db, sku=new_prod.sku, warehouse_id=w.id)
 
     # Recalculate recommendations & transfers
     await NetworkBalancingEngine.identify_network_transfers(db)

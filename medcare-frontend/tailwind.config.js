@@ -20,6 +20,24 @@ export default {
       boxShadow: {
         card: '0 1px 2px rgba(32,37,34,0.04)',
       },
+      keyframes: {
+        beltScroll: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-32px)' },
+        },
+        boxMove: {
+          '0%': { left: '0%', opacity: '1' },
+          '85%': { left: '92%', opacity: '1' },
+          '97%': { left: '104%', opacity: '0' },
+          '100%': { left: '104%', opacity: '0' },
+        },
+      },
+      animation: {
+        'belt-scroll': 'beltScroll 0.7s linear infinite',
+        'box-move-1': 'boxMove 4.2s ease-in-out infinite',
+        'box-move-2': 'boxMove 4.2s ease-in-out infinite 1.4s',
+        'box-move-3': 'boxMove 4.2s ease-in-out infinite 2.8s',
+      },
     },
   },
   plugins: [],

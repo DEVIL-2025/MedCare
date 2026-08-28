@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Play, RotateCcw, Download, Sparkles, TrendingUp, AlertTriangle, ShieldCheck, Info, HelpCircle, Layers } from 'lucide-react';
+import { RotateCcw, HelpCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import Badge from '../components/ui/Badge';
 import LoadingState from '../components/ui/LoadingState';
 import ErrorState from '../components/ui/ErrorState';
-import EmptyState from '../components/ui/EmptyState';
 import { api } from '../api/client';
 import { useControlTower } from '../context/ControlTowerContext';
 
 export default function ScenarioSimulator() {
-  const { selectedWarehouse, setSelectedWarehouse, refreshKey } = useControlTower();
+  const { selectedWarehouse, refreshKey } = useControlTower();
   const [name, setName] = useState('Flu Epidemic Spike (+60%) + Port Delay (+3d)');
   const [demandChange, setDemandChange] = useState(60);
   const [leadTimeChange, setLeadTimeChange] = useState(3);
@@ -20,7 +18,6 @@ export default function ScenarioSimulator() {
   const [warehouses, setWarehouses] = useState([]);
   const [simulationResult, setSimulationResult] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
 
   // Sync with global warehouse selection
@@ -48,7 +45,6 @@ export default function ScenarioSimulator() {
   }, []);
 
   const runSimulation = useCallback(async () => {
-    setRunning(true);
     setError(null);
     try {
       const res = await api.runScenario({
@@ -64,7 +60,6 @@ export default function ScenarioSimulator() {
       setError(err.message || 'Unable to execute scenario simulation on database.');
     } finally {
       setLoading(false);
-      setRunning(false);
     }
   }, [name, demandChange, leadTimeChange, categoryFilter, warehouseFilter]);
 
@@ -90,7 +85,6 @@ export default function ScenarioSimulator() {
 
   const summary = simulationResult?.impact_summary || {};
   const impactTrend = simulationResult?.impact_trend || [];
-  const affectedSkus = simulationResult?.affected_skus || [];
   const comparison = simulationResult?.comparison || [];
 
   return (

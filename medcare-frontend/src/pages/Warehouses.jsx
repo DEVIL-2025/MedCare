@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-  Search, Building2, Boxes, Gauge, AlertTriangle, Plus, CheckCircle2, Edit2, Trash2
+  Search, Building2, Boxes, Gauge, AlertTriangle, Plus, Edit2, Trash2
 } from 'lucide-react';
 import StatCard from '../components/ui/StatCard';
 import Badge from '../components/ui/Badge';

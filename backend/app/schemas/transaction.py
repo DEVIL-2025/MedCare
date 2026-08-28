@@ -9,6 +9,9 @@ class TransactionCreate(BaseModel):
     warehouse_id: str
     destination_warehouse_id: Optional[str] = None
     batch_id: Optional[str] = None
+    expiry_date: Optional[str] = None
+    unit_cost: Optional[float] = None
+    supplier_name: Optional[str] = None
     quantity: int = Field(..., description="Units to transact (positive integer; engine handles deduction for sales)")
     reference_id: Optional[str] = None
     reason: Optional[str] = None
