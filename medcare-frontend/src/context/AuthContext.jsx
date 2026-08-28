@@ -26,17 +26,6 @@ export const DEMO_PROFILES = [
     avatar: 'R',
     tone: 'forest',
   },
-  {
-    id: 'planner',
-    identifier: 'aditi.rao',
-    password: 'Manager@12345',
-    name: 'Dr. Aditi Rao',
-    role: 'MANAGER',
-    roleLabel: 'Lead Demand Planner',
-    department: 'Supply Chain Planning',
-    avatar: 'D',
-    tone: 'gold',
-  },
 ];
 
 function formatUser(rawUser) {
