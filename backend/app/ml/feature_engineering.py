@@ -41,11 +41,12 @@ class FeatureEngineeringService:
         df["lag_14"] = grouped["actual_demand"].shift(14)
         df["lag_21"] = grouped["actual_demand"].shift(21)
 
-        # Fill lag NaNs with current actual
+        # Backfill initial unobserved lags from the earliest observed baseline within each group
+        # (This avoids target leakage where lag_k previously copied current day y_t for t < k)
         for col in ["lag_1", "lag_7", "lag_14", "lag_21"]:
-            df[col] = df[col].fillna(df["actual_demand"])
+            df[col] = df.groupby(["sku", "warehouse_id"])[col].bfill()
 
-        # Group-isolated rolling statistics
+        # Group-isolated rolling statistics calculated strictly on historical lag_1
         grouped_lag = df.groupby(["sku", "warehouse_id"])["lag_1"]
         df["rolling_mean_7d"] = grouped_lag.transform(lambda s: s.rolling(7, min_periods=1).mean())
         df["rolling_std_7d"] = grouped_lag.transform(lambda s: s.rolling(7, min_periods=1).std()).fillna(0.0)
@@ -72,15 +73,18 @@ class FeatureEngineeringService:
     ) -> List[float]:
         """
         Computes the exact 17-feature vector for a single multi-step rollout day,
-        maintaining exact parity with construct_features() definitions.
+        maintaining exact parity with construct_features() definitions with robust cold-start fallbacks.
         """
         if not buf:
             buf = [0.0]
 
         lag_1 = float(buf[-1])
-        lag_7 = float(buf[-7]) if len(buf) >= 7 else lag_1
-        lag_14 = float(buf[-14]) if len(buf) >= 14 else lag_1
-        lag_21 = float(buf[-21]) if len(buf) >= 21 else lag_1
+        mean_history = float(np.mean(buf)) if buf else lag_1
+
+        # Smooth fallback for short history (< 7, < 14, < 21 days)
+        lag_7 = float(buf[-7]) if len(buf) >= 7 else mean_history
+        lag_14 = float(buf[-14]) if len(buf) >= 14 else (lag_7 if len(buf) >= 7 else mean_history)
+        lag_21 = float(buf[-21]) if len(buf) >= 21 else (lag_14 if len(buf) >= 14 else (lag_7 if len(buf) >= 7 else mean_history))
 
         win_7 = buf[-7:] if len(buf) >= 7 else buf
         r_7 = float(np.mean(win_7)) if len(win_7) > 0 else lag_1

@@ -121,7 +121,8 @@ async def test_ml_pipeline_training_validation_and_metadata():
         assert metadata["total_records"] > 0
         assert metadata["train_samples"] > 0
         assert metadata["validation_samples"] > 0
-        assert metadata["train_samples"] + metadata["validation_samples"] == metadata["total_records"]
+        clean_total = metadata.get("clean_records", metadata["total_records"])
+        assert metadata["train_samples"] + metadata["validation_samples"] == clean_total
 
         # Check metadata hyperparameters match actual model
         hp = metadata["hyperparameters"]

@@ -148,7 +148,7 @@ export default function Dashboard() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={demand_trend} margin={{ top: 10, right: 15, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E5E1" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#68716D' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
+                  <XAxis dataKey="date" interval={0} tick={{ fontSize: 10.5, fill: '#68716D' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#68716D' }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ borderRadius: 6, border: '1px solid #E2E5E1', fontSize: 12 }} />
                   <Legend wrapperStyle={{ fontSize: 12, color: '#68716D' }} />

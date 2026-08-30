@@ -26,12 +26,27 @@ class ModelTrainingService:
 
         # 2. Feature Engineering
         df_features = FeatureEngineeringService.construct_features(df_raw)
-        X, y = FeatureEngineeringService.get_feature_matrix(df_features)
+        df_clean = df_features.dropna(subset=FEATURE_COLUMNS + ["actual_demand"]).sort_values("date").reset_index(drop=True)
 
-        # 3. Temporal Train / Validation Split (80% train / 20% validation chronologically)
-        split_idx = int(len(X) * 0.8)
-        X_train, X_val = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_val = y.iloc[:split_idx], y.iloc[split_idx:]
+        if df_clean.empty or len(df_clean) < 20:
+            raise ValueError("Insufficient feature rows after lagging (minimum 20 clean rows required).")
+
+        # 3. True Chronological Train / Validation Split (Past 80% dates -> Future 20% dates)
+        unique_dates = sorted(df_clean["date"].unique())
+        if len(unique_dates) >= 5:
+            cutoff_idx = int(len(unique_dates) * 0.8)
+            cutoff_date = unique_dates[cutoff_idx]
+            train_df = df_clean[df_clean["date"] < cutoff_date]
+            val_df = df_clean[df_clean["date"] >= cutoff_date]
+        else:
+            split_idx = int(len(df_clean) * 0.8)
+            train_df = df_clean.iloc[:split_idx]
+            val_df = df_clean.iloc[split_idx:]
+
+        X_train = train_df[FEATURE_COLUMNS]
+        y_train = train_df["actual_demand"]
+        X_val = val_df[FEATURE_COLUMNS]
+        y_val = val_df["actual_demand"]
 
         # 4. Model Training (RandomForestRegressor)
         model = RandomForestRegressor(
@@ -51,14 +66,24 @@ class ModelTrainingService:
         # 6. Metadata Packaging
         metadata = {
             "model_type": "RandomForestRegressor (Ensemble Time-Series Forecaster)",
-            "version": "1.2.0-prod",
+            "version": "1.3.0-prod",
             "trained_at": datetime.now(timezone.utc).isoformat(),
             "total_records": len(df_raw),
+            "clean_records": len(df_clean),
             "train_samples": len(X_train),
             "validation_samples": len(X_val),
+            "validation_strategy": "Chronological Out-of-Time Holdout",
             "date_range": {
-                "start": str(df_raw["date"].min().date()),
-                "end": str(df_raw["date"].max().date())
+                "start": str(df_clean["date"].min().date()),
+                "end": str(df_clean["date"].max().date())
+            },
+            "train_date_range": {
+                "start": str(train_df["date"].min().date()),
+                "end": str(train_df["date"].max().date())
+            },
+            "val_date_range": {
+                "start": str(val_df["date"].min().date()),
+                "end": str(val_df["date"].max().date())
             },
             "features_used": FEATURE_COLUMNS,
             "metrics": val_metrics,

@@ -89,48 +89,54 @@ async def get_dashboard_data(
     health_pct = round((healthy_count / max(1, len(inv_items))) * 100) if inv_items else 100
 
     # 5. Live Demand vs Inventory Outlook Chart (Past 4 weeks actuals + 4 weeks forward ML forecast + stock levels)
-    thirty_days_ago = today - timedelta(days=30)
+    # Determine the latest date present in DemandHistory to build a continuous 8-week timeline
+    latest_dh_res = await db.execute(select(func.max(DemandHistory.date)))
+    latest_date_db = latest_dh_res.scalar()
+    anchor_date = latest_date_db if latest_date_db else today
+
+    twenty_eight_days_ago = anchor_date - timedelta(days=28)
     dh_query = (
         select(DemandHistory.date, func.sum(DemandHistory.actual_sales).label("daily_sales"))
         .join(Warehouse, DemandHistory.warehouse_id == Warehouse.id)
-        .where(Warehouse.is_active != False, DemandHistory.date >= thirty_days_ago)
+        .where(Warehouse.is_active != False, DemandHistory.date > twenty_eight_days_ago, DemandHistory.date <= anchor_date)
     )
     if warehouse and warehouse != "All":
         dh_query = dh_query.where(DemandHistory.warehouse_id == warehouse)
     
     dh_query = dh_query.group_by(DemandHistory.date).order_by(DemandHistory.date.asc())
     dh_res = await db.execute(dh_query)
-    hist_daily = dh_res.all()
+    hist_rows = {r[0]: r[1] for r in dh_res.all()}
 
-    # Aggregate weekly actuals (last 4 weeks)
+    # Aggregate 4 strictly consecutive 7-day historical actuals
     demand_trend: List[Dict[str, Any]] = []
-    
-    # Calculate baseline stock reference for the outlook chart
     current_active_stock = total_units
     avg_reorder_point = sum(i[0].reorder_point for i in inv_items) if inv_items else 5000
 
-    if hist_daily:
-        # Group into 7-day buckets
-        chunk_size = 7
-        for chunk_idx in range(0, len(hist_daily), chunk_size):
-            chunk = hist_daily[chunk_idx:chunk_idx + chunk_size]
-            w_label = f"Wk {chunk_idx // chunk_size + 1} ({chunk[0][0].strftime('%d %b')})"
-            w_total = sum(row[1] for row in chunk)
-            demand_trend.append({
-                "date": w_label,
-                "actual": w_total,
-                "forecast": None,
-                "inventory": current_active_stock,
-                "reorderPoint": int(avg_reorder_point)
-            })
+    past_week_sums = []
+    for i in range(4, 0, -1):
+        w_start = anchor_date - timedelta(days=i * 7)
+        w_end = anchor_date - timedelta(days=(i - 1) * 7)
+        w_sales = sum(
+            sales for d, sales in hist_rows.items()
+            if w_start < d <= w_end
+        )
+        past_week_sums.append(w_sales)
+        w_label = f"Wk {5 - i} ({(w_start + timedelta(days=1)).strftime('%d %b')})"
+        demand_trend.append({
+            "date": w_label,
+            "actual": w_sales,
+            "forecast": None,
+            "inventory": current_active_stock,
+            "reorderPoint": int(avg_reorder_point)
+        })
 
-    # Forward 4 weeks ML forecast projection
-    avg_weekly_demand = (sum(r["actual"] for r in demand_trend) / len(demand_trend)) if demand_trend else 500
+    # Forward 4 weeks continuous ML forecast projection starting immediately after anchor_date
+    avg_weekly_demand = (sum(past_week_sums) / len(past_week_sums)) if past_week_sums and sum(past_week_sums) > 0 else 500
     running_projected_stock = current_active_stock
 
     for fw in range(1, 5):
-        f_date = today + timedelta(weeks=fw)
-        w_date = f"Wk +{fw} ({f_date.strftime('%d %b')})"
+        f_start = anchor_date + timedelta(days=(fw - 1) * 7 + 1)
+        w_date = f"Wk +{fw} ({f_start.strftime('%d %b')})"
         w_forecast = round(avg_weekly_demand * (1.10 if fw <= 2 else 1.05))
         running_projected_stock = max(0, running_projected_stock - w_forecast)
         demand_trend.append({

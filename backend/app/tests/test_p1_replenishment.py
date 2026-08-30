@@ -12,7 +12,7 @@ async def test_replenishment_recommendations_generation():
         for r in recs:
             assert r.recommended_quantity >= 0
             assert r.recommended_frequency is not None
-            assert r.decision_type in ["REPLENISH", "TRANSFER", "URGENT_REPLENISHMENT", "MONITOR"]
+            assert r.decision_type in ["REPLENISH", "TRANSFER", "URGENT_REPLENISHMENT", "MONITOR", "INBOUND_MONITORING"]
             assert r.reason_what is not None
             assert r.reason_why is not None
         await session.rollback()
