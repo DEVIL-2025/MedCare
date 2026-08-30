@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     EMAIL_FROM: str = ""
     EMAIL_TO: Optional[str] = None
-    APP_FRONTEND_URL: str = "http://localhost:5173"
+    APP_FRONTEND_URL: str = "https://med-care-puce-tau.vercel.app/"
 
 
 settings = Settings()
